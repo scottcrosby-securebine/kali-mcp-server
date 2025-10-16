@@ -1,12 +1,14 @@
-# Docker MCP Toolkit Setup
+# Docker MCP Gateway Setup
 
-Complete guide for registering and managing Kali MCP Server using Docker Desktop's MCP Toolkit.
+Complete guide for registering and managing Kali MCP Server using Docker Desktop's MCP Gateway.
+
+**🤖 For AI-assisted security testing with Warp Terminal**, see the comprehensive [**Warp AI Terminal Guide**](docs/WARP_TERMINAL_GUIDE.md) - includes beginner-friendly setup, AI prompts, troubleshooting, and best practices.
 
 ---
 
 ## 📋 Table of Contents
 
-- [What is Docker MCP Toolkit](#what-is-docker-mcp-toolkit)
+- [What is Docker MCP Gateway](#what-is-docker-mcp-gateway)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Server Registration](#server-registration)
@@ -18,22 +20,29 @@ Complete guide for registering and managing Kali MCP Server using Docker Desktop
 
 ---
 
-## 🎯 What is Docker MCP Toolkit
+## 🎯 What is Docker MCP Gateway
 
-Docker MCP Toolkit is a feature in Docker Desktop that enables centralized management of MCP (Model Context Protocol) servers. It provides:
+### Overview for Non-Programmers
+
+Docker MCP Gateway is a feature in Docker Desktop that acts as a **secure master control center** for managing security tool servers. Think of it as a safe, organized command center that:
+
+- **Manages all your security tool servers** in one place (like a switchboard operator)
+- **Enforces safety controls** automatically (no raw sockets, non-root user)
+- **Makes tools available** to AI assistants like Warp and Claude
+- **Creates temporary containers** on-demand (clean slate every time)
 
 **Benefits:**
-- **Centralized registration** - Register servers once, use from multiple clients
+- **Centralized registration** - Register servers once, use from multiple clients (Warp, Claude, etc.)
 - **Automatic discovery** - MCP clients can auto-detect registered servers
 - **Consistent security** - Enforced security policies across all servers
 - **Simplified updates** - Update server image once, affects all clients
 - **Resource management** - Control resource allocation per server
 
-**How it works:**
-1. Docker Desktop manages MCP server lifecycle
+**How it works (simplified):**
+1. Docker Desktop's Gateway manages MCP server lifecycle
 2. Servers are launched on-demand when MCP clients request them
-3. Communication happens via stdio (standard input/output)
-4. Containers are ephemeral (created on demand, removed after use)
+3. Communication happens via stdio (standard input/output) - like a secure pipeline
+4. Containers are ephemeral (created on demand, removed after use) - fresh every time
 
 ---
 
@@ -90,14 +99,14 @@ Follow distribution-specific instructions at [docs.docker.com](https://docs.dock
 
 ---
 
-### Step 2: Enable MCP Toolkit
+### Step 2: Enable MCP Gateway
 
 **Via Docker Desktop UI:**
 
 1. Open **Docker Desktop**
 2. Click **Settings** (gear icon)
 3. Navigate to **Features** or **Extensions**
-4. Find **"MCP Toolkit"** or **"Model Context Protocol"**
+4. Find **"MCP Gateway"**, **"MCP"**, or **"Model Context Protocol"**
 5. Toggle to **Enabled**
 6. Click **Apply & Restart**
 
@@ -113,7 +122,7 @@ Follow distribution-specific instructions at [docs.docker.com](https://docs.dock
 # Windows: %APPDATA%\Docker\log
 # Linux: ~/.docker/desktop/log
 
-# Look for: "MCP Toolkit initialized" or similar
+# Look for: "MCP Gateway initialized" or similar
 ```
 
 ---
@@ -764,11 +773,11 @@ servers:
 
 ## 📚 Additional Resources
 
+- **Warp AI Terminal Guide:** [docs/WARP_TERMINAL_GUIDE.md](docs/WARP_TERMINAL_GUIDE.md) - **Recommended**: Complete AI-assisted security testing guide
 - **Docker MCP Documentation:** Check Docker Desktop docs
 - **MCP Specification:** [modelcontextprotocol.io](https://modelcontextprotocol.io/)
 - **Kali Tools:** [README.md](README.md)
 - **Deployment Guide:** [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)
-- **Warp Integration:** [WARP_SETUP.md](WARP_SETUP.md)
 
 ---
 
@@ -782,10 +791,10 @@ servers:
 
 ## ✅ Checklist
 
-Before using Docker MCP with Kali MCP Server:
+Before using Docker MCP Gateway with Kali MCP Server:
 
 - [ ] Docker Desktop 4.30+ installed
-- [ ] MCP Toolkit enabled in Docker Desktop
+- [ ] MCP Gateway enabled in Docker Desktop
 - [ ] Kali MCP Server image built
 - [ ] Configuration file created (`~/.docker/mcp/custom.yaml`)
 - [ ] Server registered with correct parameters

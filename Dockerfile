@@ -116,7 +116,7 @@ RUN useradd -m -u 1000 pentest && \
     chown -R pentest:pentest /app
 
 # Fix nmap permission issue for Docker MCP compatibility
-# Docker MCP Toolkit runs containers with --security-opt no-new-privileges
+# Docker MCP Gateway runs containers with --security-opt no-new-privileges
 # This blocks setcap capabilities from working. We must remove them for nmap to execute.
 # All nmap scans use -sT (TCP connect) and -Pn flags which don't require raw sockets.
 RUN setcap -r /usr/bin/nmap 2>/dev/null || true && \

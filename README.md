@@ -2,7 +2,7 @@
 
 **Kali Linux Penetration Testing MCP Server v2**
 
-A comprehensive Model Context Protocol (MCP) server providing 42 professional-grade security testing tools from Kali Linux, optimized for ARM64 (Apple Silicon) Macs and Docker MCP Toolkit.
+A comprehensive Model Context Protocol (MCP) server providing 42 professional-grade security testing tools from Kali Linux, optimized for ARM64 (Apple Silicon) Macs and Docker MCP Gateway.
 
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue)](https://www.docker.com/)
 [![ARM64](https://img.shields.io/badge/ARM64-Optimized-green)](https://www.apple.com/mac/)
@@ -37,13 +37,15 @@ This MCP server provides powerful penetration testing and security assessment to
 
 ## 📖 Documentation
 
+**⭐ AI-First Security Testing:**
+- 🤖 [**Warp AI Terminal Guide**](docs/WARP_TERMINAL_GUIDE.md) - **RECOMMENDED**: Comprehensive AI-assisted security testing with Warp Terminal and Docker MCP Gateway
+
 **Quick Start:**
 - 🚀 [**Quick Start Guide**](QUICK_START.md) - Get started in 5 minutes
-- 🎯 [**Warp Terminal Setup**](WARP_SETUP.md) - Integration with Warp Terminal
 
 **Complete Guides:**
 - 📚 [**Deployment Guide**](DEPLOYMENT_GUIDE.md) - Comprehensive deployment instructions
-- 🐳 [**Docker MCP Toolkit Setup**](SETUP_DOCKER_MCP.md) - Detailed Docker MCP configuration
+- 🐳 [**Docker MCP Gateway Setup**](SETUP_DOCKER_MCP.md) - Detailed Docker MCP Gateway configuration
 
 ---
 
@@ -94,12 +96,12 @@ This MCP server provides AI assistants like Claude with access to professional p
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Claude Desktop / MCP Client              │
+│          Warp Terminal / Claude Desktop / MCP Clients        │
 └──────────────────────────┬──────────────────────────────────┘
                            │ MCP Protocol (stdio)
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   Docker MCP Toolkit Gateway                │
+│                    Docker MCP Gateway                        │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │ Security Controls:                                    │  │
 │  │ • --security-opt no-new-privileges                   │  │
@@ -182,9 +184,9 @@ For comprehensive installation instructions, see the [**Deployment Guide**](DEPL
 ### Prerequisites
 
 1. **Docker Desktop** - [Download here](https://www.docker.com/products/docker-desktop)
-2. **Docker MCP Toolkit** - See [Docker MCP Setup Guide](SETUP_DOCKER_MCP.md)
+2. **Docker MCP Gateway** - See [Docker MCP Gateway Setup Guide](SETUP_DOCKER_MCP.md)
 3. **Apple Silicon Mac** (M1/M2/M3) or ARM64-compatible system
-4. **Claude Desktop**, **Warp Terminal**, or other MCP client
+4. **Warp Terminal**, **Claude Desktop**, or other MCP client
 
 ### Building the Docker Image
 
@@ -222,9 +224,9 @@ kali-mcp-server   latest   <image-id>   <time>   ~3.2GB
 
 Choose your preferred client:
 
+- **Warp Terminal** (Recommended): See [Warp AI Terminal Guide](docs/WARP_TERMINAL_GUIDE.md) - AI-assisted security testing
 - **Claude Desktop**: See [Quick Start Guide](QUICK_START.md) or [Deployment Guide](DEPLOYMENT_GUIDE.md)
-- **Warp Terminal**: See [Warp Terminal Setup](WARP_SETUP.md)
-- **Docker MCP Toolkit**: See [Docker MCP Setup Guide](SETUP_DOCKER_MCP.md)
+- **Docker MCP Gateway**: See [Docker MCP Gateway Setup Guide](SETUP_DOCKER_MCP.md)
 
 ### Example Usage
 
@@ -372,7 +374,7 @@ Once configured, you can ask Claude things like:
 
 ### Security Restrictions
 
-Docker MCP Toolkit implements several security controls that affect tool behavior:
+Docker MCP Gateway implements several security controls that affect tool behavior:
 
 #### 1. **`--security-opt no-new-privileges`**
 
@@ -599,16 +601,16 @@ SOFTWARE.
 
 ### Project Documentation
 
+- [Warp AI Terminal Guide](docs/WARP_TERMINAL_GUIDE.md) - **Recommended**: Complete AI-assisted security testing guide
 - [Quick Start Guide](QUICK_START.md) - 5-minute setup
 - [Deployment Guide](DEPLOYMENT_GUIDE.md) - Complete deployment instructions
-- [Warp Terminal Setup](WARP_SETUP.md) - Warp Terminal integration
-- [Docker MCP Setup](SETUP_DOCKER_MCP.md) - Docker MCP Toolkit configuration
+- [Docker MCP Gateway Setup](SETUP_DOCKER_MCP.md) - Docker MCP Gateway configuration
 
 ### External Resources
 
 - [Kali Linux Documentation](https://www.kali.org/docs/)
 - [Model Context Protocol Specification](https://modelcontextprotocol.io/)
-- [Docker MCP Toolkit Documentation](https://docs.docker.com/mcp/)
+- [Docker MCP Gateway Documentation](https://docs.docker.com/mcp/)
 - [OWASP Testing Guide](https://owasp.org/www-project-web-security-testing-guide/)
 - [Penetration Testing Execution Standard](http://www.pentest-standard.org/)
 

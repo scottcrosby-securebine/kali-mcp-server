@@ -10,7 +10,7 @@ Complete deployment instructions for all environments and MCP clients.
 - [Prerequisites](#prerequisites)
 - [Deployment Options](#deployment-options)
   - [Option A: Docker Desktop (Standard)](#option-a-docker-desktop-standard)
-  - [Option B: Docker MCP Toolkit](#option-b-docker-mcp-toolkit)
+  - [Option B: Docker MCP Gateway (Recommended)](#option-b-docker-mcp-gateway-recommended)
   - [Option C: Local Python](#option-c-local-python)
 - [MCP Client Configuration](#mcp-client-configuration)
 - [Security Best Practices](#security-best-practices)
@@ -22,7 +22,9 @@ Complete deployment instructions for all environments and MCP clients.
 
 ## 🎯 Overview
 
-The Kali MCP Server provides **42 professional security testing tools** through the Model Context Protocol (MCP). This enables AI assistants like Claude Desktop and Warp Terminal to perform authorized security assessments on your behalf.
+The Kali MCP Server provides **42 professional security testing tools** through the Model Context Protocol (MCP). This enables AI assistants like Warp Terminal and Claude Desktop to perform authorized security assessments on your behalf.
+
+**🤖 For AI-assisted security testing with Warp Terminal**, see the comprehensive [**Warp AI Terminal Guide**](docs/WARP_TERMINAL_GUIDE.md) - includes beginner-friendly setup, AI prompts, troubleshooting, and best practices.
 
 **Key Features:**
 - **ARM64 optimized** for Apple Silicon Macs
@@ -58,8 +60,8 @@ The Kali MCP Server provides **42 professional security testing tools** through 
 ### Optional
 
 - **Git:** For cloning repository
-- **MCP Client:** Claude Desktop, Warp Terminal, or another MCP-compatible client
-- **Docker MCP Toolkit:** For centralized server management
+- **MCP Client:** Warp Terminal, Claude Desktop, or another MCP-compatible client
+- **Docker MCP Gateway:** For centralized server management (recommended)
 
 ---
 
@@ -140,27 +142,30 @@ Restart your MCP client to load the new configuration.
 
 ---
 
-### Option B: Docker MCP Toolkit
+### Option B: Docker MCP Gateway (Recommended)
 
-Use Docker Desktop's built-in MCP management for centralized server registration.
+Use Docker Desktop's built-in MCP Gateway for centralized server management.
+
+**✨ This is the recommended approach** for AI-assisted security testing with Warp Terminal.
 
 #### Benefits
 
-- **Centralized management** - Register once, use from multiple clients
+- **Centralized management** - Register once, use from multiple clients (Warp, Claude, etc.)
 - **Automatic discovery** - Clients can auto-detect registered servers
 - **Consistent security** - Enforced security policies
 - **Easier updates** - Update image once, affects all clients
+- **AI-friendly** - Optimized for Warp AI workflows
 
 #### Requirements
 
 - Docker Desktop 4.30+
-- MCP Toolkit enabled in Docker Desktop settings
+- MCP Gateway enabled in Docker Desktop settings
 
 #### Setup Process
 
-1. **Enable MCP in Docker Desktop**
+1. **Enable MCP Gateway in Docker Desktop**
 
-   Open Docker Desktop → Settings → Features → Enable "MCP Toolkit"
+   Open Docker Desktop → Settings → Features → Enable "MCP Gateway" or "MCP"
 
    (Exact location may vary by Docker Desktop version)
 
@@ -203,7 +208,7 @@ Use Docker Desktop's built-in MCP management for centralized server registration
 
 5. **Connect from clients**
 
-   - **Warp Terminal:** See [WARP_SETUP.md](WARP_SETUP.md)
+   - **Warp Terminal** (Recommended): See [Warp AI Terminal Guide](docs/WARP_TERMINAL_GUIDE.md) - Complete AI-assisted security testing guide
    - **Claude Desktop:** Should auto-discover registered servers
    - **Other clients:** Consult client documentation
 
@@ -297,6 +302,25 @@ Use absolute paths in your configuration:
 
 ## 🔧 MCP Client Configuration
 
+### Warp Terminal (Recommended)
+
+**🤖 For complete Warp AI Terminal setup**, see the comprehensive [**Warp AI Terminal Guide**](docs/WARP_TERMINAL_GUIDE.md).
+
+The guide includes:
+- Beginner-friendly Docker MCP Gateway setup
+- AI-assisted workflows for all 42 security tools
+- Extensive "Ask Warp AI" prompts
+- Troubleshooting with AI assistance
+- Real-world security testing scenarios
+
+**Quick summary:**
+1. Enable Docker MCP Gateway in Docker Desktop
+2. Register kali-mcp-server using the provided YAML examples
+3. Configure Warp to use Docker MCP Gateway provider
+4. Access via Warp AI features for guided security testing
+
+---
+
 ### Claude Desktop
 
 **Config locations:**
@@ -332,21 +356,11 @@ Use absolute paths in your configuration:
 
 ---
 
-### Warp Terminal
-
-See [WARP_SETUP.md](WARP_SETUP.md) for complete Warp Terminal integration guide.
-
-**Quick summary:**
-1. Enable Docker MCP in Docker Desktop
-2. Register kali-mcp-server
-3. Configure Warp to use Docker MCP provider
-4. Access via Warp AI features
-
----
-
 ### Other MCP Clients
 
-For clients not listed here, follow the client's MCP server registration documentation. Key points:
+For clients not listed here, follow the client's MCP server registration documentation.
+
+Key points:
 
 - **Transport:** stdio (standard input/output)
 - **Command:** `docker` or `python3`
@@ -361,7 +375,7 @@ For clients not listed here, follow the client's MCP server registration documen
 
 1. **Always use `--security-opt no-new-privileges`**
    - Prevents privilege escalation inside container
-   - Required by Docker MCP Toolkit
+   - Required by Docker MCP Gateway
 
 2. **Use `--rm` flag**
    - Removes container after exit
@@ -619,7 +633,7 @@ docker container prune
 
 ## 📊 Deployment Comparison
 
-| Feature | Docker (Standard) | Docker MCP Toolkit | Local Python |
+| Feature | Docker (Standard) | Docker MCP Gateway | Local Python |
 |---------|-------------------|-------------------|--------------|
 | **Setup Time** | 30 minutes | 45 minutes | 1-2 hours |
 | **Isolation** | ✅ Full | ✅ Full | ❌ Partial |
@@ -651,9 +665,9 @@ Before deploying to production use:
 
 ## 📚 Additional Resources
 
+- **[Warp AI Terminal Guide](docs/WARP_TERMINAL_GUIDE.md)** - **RECOMMENDED**: Complete AI-assisted security testing guide
 - [QUICK_START.md](QUICK_START.md) - 5-minute setup guide
-- [WARP_SETUP.md](WARP_SETUP.md) - Warp Terminal integration
-- [SETUP_DOCKER_MCP.md](SETUP_DOCKER_MCP.md) - Docker MCP Toolkit details
+- [SETUP_DOCKER_MCP.md](SETUP_DOCKER_MCP.md) - Docker MCP Gateway configuration details
 - [README.md](README.md) - Complete tool reference
 - [LICENSE](LICENSE) - Terms and conditions
 

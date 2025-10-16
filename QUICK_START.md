@@ -75,13 +75,15 @@ The server communicates via stdio (standard input/output), so your MCP client ne
 
 ---
 
-### Option B: Docker MCP Toolkit (Warp Terminal)
+### Option B: Docker MCP Gateway (Warp Terminal) - **RECOMMENDED**
 
-If using Docker Desktop's MCP integration:
+**⭐ For AI-assisted security testing**, see the comprehensive [**Warp AI Terminal Guide**](docs/WARP_TERMINAL_GUIDE.md) - includes beginner-friendly setup, AI prompts, troubleshooting, and best practices.
+
+If using Docker Desktop's MCP Gateway integration:
 
 1. **Enable MCP** in Docker Desktop Settings
 2. **Register the server** (see SETUP_DOCKER_MCP.md for details)
-3. **Connect from Warp** (see WARP_SETUP.md for full guide)
+3. **Connect from Warp Terminal** (see [Warp AI Terminal Guide](docs/WARP_TERMINAL_GUIDE.md) for complete walkthrough)
 
 Quick registration entry:
 ```json
@@ -273,9 +275,9 @@ docker image prune
 Now that your server is running:
 
 1. **Read the full documentation:**
+   - 🤖 **[Warp AI Terminal Guide](docs/WARP_TERMINAL_GUIDE.md)** - **RECOMMENDED**: Complete AI-assisted security testing guide with Docker MCP Gateway
    - [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - Comprehensive deployment options
-   - [WARP_SETUP.md](WARP_SETUP.md) - Warp Terminal integration
-   - [SETUP_DOCKER_MCP.md](SETUP_DOCKER_MCP.md) - Docker MCP Toolkit details
+   - [SETUP_DOCKER_MCP.md](SETUP_DOCKER_MCP.md) - Docker MCP Gateway configuration details
    - [README.md](README.md) - Complete tool reference
 
 2. **Practice on authorized targets:**
