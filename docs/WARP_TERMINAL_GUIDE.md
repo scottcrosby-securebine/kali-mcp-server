@@ -441,7 +441,7 @@ First, get the Kali MCP server code (if you haven't already):
 
 ```bash
 cd ~/Documents
-git clone https://github.com/YOUR-USERNAME/kali-mcp-server.git
+git clone https://github.com/scottcrosby-securebine/kali-mcp-server.git
 cd kali-mcp-server
 ```
 
