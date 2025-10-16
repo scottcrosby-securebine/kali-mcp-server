@@ -73,3 +73,6 @@ dist/
 *.bak
 *.backup
 *~
+
+# Build/preparation artifacts
+prep-for-github.sh
