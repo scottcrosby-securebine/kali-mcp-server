@@ -1,43 +1,29 @@
-# Python
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# Documentation (not needed in container)
+*.md
+docs/
+
+# Python cache
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
 # Virtual environments
 venv/
 env/
 ENV/
-env.bak/
-venv.bak/
 
 # macOS
 .DS_Store
 .AppleDouble
 .LSOverride
 ._*
-.Spotlight-V100
-.Trashes
-.Trash-*/
-ehthumbs.db
-Thumbs.db
 
 # IDEs
 .vscode/
@@ -52,24 +38,26 @@ logs/
 tmp/
 temp/
 
-# Testing and coverage
+# Testing
 .pytest_cache/
 .mypy_cache/
 .coverage
 htmlcov/
+TEST_REPORT_*.md
+IMPLEMENTATION_*.md
 
 # Build artifacts
 build/
 dist/
 *.egg-info/
 
-# Environment files
-.env
-.env.local
-.env.production
-*.env
-
 # Backup files
 *.bak
 *.backup
 *~
+
+# Scripts not needed in container
+prep-for-github.sh
+
+# License (include in build)
+!LICENSE
