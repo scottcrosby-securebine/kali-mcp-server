@@ -193,7 +193,7 @@ For comprehensive installation instructions, see the [**Deployment Guide**](DEPL
 1. **Clone or download this repository**
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/kali-mcp-server.git
+git clone https://github.com/scottcrosby-securebine/kali-mcp-server.git
 cd kali-mcp-server
 ```
 

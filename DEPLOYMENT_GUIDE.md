@@ -74,7 +74,7 @@ The simplest deployment method - run the server as a Docker container spawned by
 #### Step 1: Clone Repository
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/kali-mcp-server.git
+git clone https://github.com/scottcrosby-securebine/kali-mcp-server.git
 cd kali-mcp-server
 ```
 
@@ -234,7 +234,7 @@ Run the server directly with Python (without Docker).
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR-USERNAME/kali-mcp-server.git
+git clone https://github.com/scottcrosby-securebine/kali-mcp-server.git
 cd kali-mcp-server
 
 # Create virtual environment

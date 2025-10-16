@@ -131,7 +131,7 @@ Follow distribution-specific instructions at [docs.docker.com](https://docs.dock
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR-USERNAME/kali-mcp-server.git
+git clone https://github.com/scottcrosby-securebine/kali-mcp-server.git
 cd kali-mcp-server
 
 # Build image
@@ -783,7 +783,7 @@ servers:
 
 ## 📞 Support
 
-- **GitHub Issues:** [Report problems](https://github.com/YOUR-USERNAME/kali-mcp-server/issues)
+- **GitHub Issues:** [Report problems](https://github.com/scottcrosby-securebine/kali-mcp-server/issues)
 - **Docker Forums:** [Docker Community](https://forums.docker.com/)
 - **MCP Community:** [MCP Discussions](https://github.com/modelcontextprotocol)
 

@@ -21,7 +21,7 @@ Before you begin, ensure you have:
 ### Step 1: Get the Code
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/kali-mcp-server.git
+git clone https://github.com/scottcrosby-securebine/kali-mcp-server.git
 cd kali-mcp-server
 ```
 
@@ -309,7 +309,7 @@ See [LICENSE](LICENSE) for terms and conditions.
 
 ## 🆘 Getting Help
 
-- **Issues:** Report bugs via [GitHub Issues](https://github.com/YOUR-USERNAME/kali-mcp-server/issues)
+- **Issues:** Report bugs via [GitHub Issues](https://github.com/scottcrosby-securebine/kali-mcp-server/issues)
 - **Documentation:** Check README.md and deployment guides
 - **Community:** Join discussions for tips and best practices
 
