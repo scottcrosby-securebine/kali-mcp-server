@@ -98,20 +98,22 @@ class LegacyToolContractTests(unittest.TestCase):
             if isinstance(statement, (ast.Assign, ast.AnnAssign))
             and statement.value is not None
         ]
-        changed = True
-        while changed:
-            changed = False
-            for statement in assignment_statements:
-                if not isinstance(statement.value, ast.Name):
-                    continue
-                resolved = module_aliases.get(statement.value.id, statement.value.id)
-                if resolved not in module_functions:
-                    continue
-                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-                for target in targets:
-                    if isinstance(target, ast.Name) and target.id not in module_aliases:
-                        module_aliases[target.id] = resolved
-                        changed = True
+        direct_aliases = {}
+        for statement in assignment_statements:
+            if not isinstance(statement.value, ast.Name):
+                continue
+            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    direct_aliases[target.id] = statement.value.id
+        for alias in direct_aliases:
+            resolved = alias
+            seen = set()
+            while resolved in direct_aliases and resolved not in seen:
+                seen.add(resolved)
+                resolved = direct_aliases[resolved]
+            if resolved in module_functions:
+                module_aliases[alias] = resolved
         module_explicit_containers = set()
         changed = True
         while changed:
@@ -138,7 +140,7 @@ class LegacyToolContractTests(unittest.TestCase):
                     if isinstance(node.func, ast.Name):
                         called_names.add(module_aliases.get(node.func.id, node.func.id))
                     elif isinstance(node.func, ast.Attribute):
-                        called_names.add(node.func.attr)
+                        called_names.add(module_aliases.get(node.func.attr, node.func.attr))
                 if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
                     if node.id in explicit_only and node.id != function_name:
                         referenced_explicit.add(node.id)
