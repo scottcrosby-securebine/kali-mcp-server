@@ -27,14 +27,17 @@ import kali_pentest_server as server
 class ProfileCapabilityTests(unittest.TestCase):
     def test_fixed_category_nmap_wrappers_exclude_broadcast_scripts(self):
         cases = (
-            (server.nmap_vuln_scan, "--script=(vuln) and not broadcast"),
-            (server.nmap_comprehensive_scan, "--script=(default) and not broadcast"),
+            (server.nmap_vuln_scan, "(vuln)"),
+            (server.nmap_comprehensive_scan, "(default)"),
         )
-        for wrapper, expected_selector in cases:
+        for wrapper, requested_selector in cases:
             with self.subTest(wrapper=wrapper.__name__), patch.object(server, "run_command", return_value="ok") as run_command:
                 result = asyncio.run(wrapper("192.0.2.1"))
                 self.assertEqual("ok", result)
-                self.assertIn(expected_selector, run_command.call_args.args[0])
+                selector = next(value for value in run_command.call_args.args[0] if value.startswith("--script="))
+                self.assertIn(requested_selector, selector)
+                self.assertIn("not broadcast", selector)
+                self.assertIn("--unprivileged", run_command.call_args.args[0])
 
     def test_broadcast_nse_category_fails_before_command_execution(self):
         for profile in ("linux-full", "linux-hardened", "mac-hardened"):
@@ -68,7 +71,9 @@ class ProfileCapabilityTests(unittest.TestCase):
         with patch.object(server, "run_command", return_value="ok") as run_command:
             result = asyncio.run(server.nmap_script_scan("192.0.2.1", "safe,discovery"))
             self.assertEqual("ok", result)
-            self.assertIn("--script=(safe or discovery) and not broadcast", run_command.call_args.args[0])
+            selector = next(value for value in run_command.call_args.args[0] if value.startswith("--script="))
+            self.assertIn("--script=(safe or discovery) and not broadcast", selector)
+            self.assertIn("--unprivileged", run_command.call_args.args[0])
 
     def test_every_allowed_category_excludes_overlapping_broadcast_scripts(self):
         allowed = ("default", "safe", "discovery", "auth", "vuln", "exploit", "intrusive", "malware")
@@ -76,7 +81,23 @@ class ProfileCapabilityTests(unittest.TestCase):
             with self.subTest(category=category), patch.object(server, "run_command", return_value="ok") as run_command:
                 asyncio.run(server.nmap_script_scan("192.0.2.1", category))
                 command = run_command.call_args.args[0]
-                self.assertIn(f"--script=({category}) and not broadcast", command)
+                selector = next(value for value in command if value.startswith("--script="))
+                self.assertIn(f"--script=({category}) and not broadcast", selector)
+                self.assertIn("--unprivileged", command)
+
+    def test_every_nmap_wrapper_forces_unprivileged_mode(self):
+        cases = (
+            (server.nmap_scan, ("192.0.2.1",)),
+            (server.nmap_service_scan, ("192.0.2.1",)),
+            (server.nmap_vuln_scan, ("192.0.2.1",)),
+            (server.nmap_comprehensive_scan, ("192.0.2.1",)),
+            (server.nmap_port_scan, ("192.0.2.1", "443")),
+            (server.nmap_script_scan, ("192.0.2.1", "safe")),
+        )
+        for wrapper, arguments in cases:
+            with self.subTest(wrapper=wrapper.__name__), patch.object(server, "run_command", return_value="ok") as run_command:
+                asyncio.run(wrapper(*arguments))
+                self.assertIn("--unprivileged", run_command.call_args.args[0])
 
 
 if __name__ == "__main__":
