@@ -137,6 +137,19 @@ class ScannerAdapterTests(unittest.TestCase):
                 self.assertFalse(files)
                 self.assertNotIn("Traceback", response)
 
+    def test_schema_invalid_json_creates_no_result(self):
+        malformed_shapes = (
+            {"Results": {}},
+            {"Results": [{"Vulnerabilities": {"VulnerabilityID": "CVE-X"}}]},
+            {"artifacts": {"name": "not-a-list"}},
+        )
+        calls = (("trivy", ("demo", "filesystem")), ("trivy", ("demo", "filesystem")), ("syft", ("demo", "dir")))
+        for (scanner, args), output in zip(calls, malformed_shapes):
+            with self.subTest(scanner=scanner, output=output):
+                response, _, files = self.invoke(scanner, *args, stdout=json.dumps(output))
+                self.assertIn("Error", response)
+                self.assertFalse(files)
+
     def test_nested_secrets_are_redacted_without_discarding_findings(self):
         cases = (
             ("trivy", ("demo", "filesystem"), "secret-bearing-trivy.json", ("TrivyPass-6", "TrivyToken-6", "TrivyBearer-6", "TrivyPassword-6"), "keep-this-package"),
@@ -150,6 +163,18 @@ class ScannerAdapterTests(unittest.TestCase):
                     self.assertNotIn(sentinel, response)
                     self.assertNotIn(sentinel, persisted)
                 self.assertIn(retained, persisted)
+
+    def test_native_secret_match_and_colon_delimited_error_are_redacted(self):
+        output = {"Results": [{"Secrets": [{"RuleID": "fixture-secret", "Match": "SUPERSECRET-RAW-VALUE"}]}]}
+        response, _, files = self.invoke("trivy", "demo", "filesystem", stdout=json.dumps(output))
+        self.assertNotIn("SUPERSECRET-RAW-VALUE", files[0][1])
+        self.assertIn("fixture-secret", files[0][1])
+
+        response, _, files = self.invoke(
+            "trivy", "demo", "filesystem", stdout="", stderr="password: SUPERSECRET-COLON", returncode=2
+        )
+        self.assertNotIn("SUPERSECRET-COLON", response)
+        self.assertFalse(files)
 
     def test_existing_result_is_never_overwritten(self):
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=fixture("trivy-success.json"), stderr="")
