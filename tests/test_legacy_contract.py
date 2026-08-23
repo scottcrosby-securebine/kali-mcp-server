@@ -50,9 +50,12 @@ class LegacyToolContractTests(unittest.TestCase):
                 self.assertIs(str, signature.return_annotation)
 
     def test_registration_preserves_ordered_legacy_inventory(self):
-        expected = [tool["name"] for tool in self.contract["tools"]]
+        expected = [
+            tool["name"]
+            for tool in self.contract["tools"] + self.contract["additions"]
+        ]
         registered = [function.__name__ for function in self.mcp.tools]
-        self.assertEqual(expected + self.contract["additions"], registered)
+        self.assertEqual(expected, registered)
 
     def test_default_invocation_returns_string_without_subprocess(self):
         with patch.object(self.server, "run_command") as run_command:
