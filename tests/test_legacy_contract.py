@@ -217,17 +217,23 @@ class LegacyToolContractTests(unittest.TestCase):
 
         for composite in self.contract["composites"]:
             reachable = set()
+            public_boundaries = set()
             pending = [composite]
             while pending:
                 function_name = pending.pop()
                 if function_name in reachable:
                     continue
                 reachable.add(function_name)
-                pending.extend(
-                    called
-                    for called in call_graph.get(function_name, set()) - reachable
-                    if called not in public_names or called == composite
-                )
+                for called in call_graph.get(function_name, set()) - reachable:
+                    if called in public_names and called != composite:
+                        public_boundaries.add(called)
+                    else:
+                        pending.append(called)
+            self.assertEqual(
+                set(self.contract["composites"][composite]),
+                public_boundaries,
+                f"{composite} must reach only its declared public tools",
+            )
             self.assertNotIn(
                 "run_command",
                 reachable,
