@@ -111,6 +111,7 @@ class LegacyToolContractTests(unittest.TestCase):
                 f"{function_name} must not auto-chain explicit-only tools",
             )
 
+        public_call_graph = {}
         for tool_name in public_names - explicit_only:
             awaited = [
                 node.value
@@ -129,23 +130,21 @@ class LegacyToolContractTests(unittest.TestCase):
                     explicit_only,
                     f"{tool_name} must not auto-chain explicit-only tools",
                 )
+            public_calls = [
+                (call.lineno, call.func.id)
+                for call in awaited
+                if call.func.id in public_names
+            ]
+            if tool_name in self.contract["composites"]:
+                self.assertEqual(len(awaited), len(public_calls))
+            if public_calls:
+                public_call_graph[tool_name] = [
+                    name for _line, name in sorted(public_calls)
+                ]
 
-        actual = {}
-        for composite, expected_calls in self.contract["composites"].items():
-            awaited_names = []
-            for node in ast.walk(definitions[composite]):
-                if not isinstance(node, ast.Await):
-                    continue
-                call = node.value
-                self.assertIsInstance(call, ast.Call)
-                self.assertIsInstance(
-                    call.func,
-                    ast.Name,
-                    f"{composite} must call declared tools directly",
-                )
-                awaited_names.append((node.lineno, call.func.id))
-            actual[composite] = [name for _line, name in sorted(awaited_names)]
-            self.assertEqual(expected_calls, actual[composite])
+        self.assertEqual(self.contract["composites"], public_call_graph)
+
+        for composite in self.contract["composites"]:
             self.assertNotIn(
                 "run_command",
                 {
@@ -155,8 +154,6 @@ class LegacyToolContractTests(unittest.TestCase):
                 },
                 f"{composite} must delegate through public tool wrappers",
             )
-
-        self.assertEqual(self.contract["composites"], actual)
 
     def _run_composite(self, composite, target, expected_calls):
         call_log = []
