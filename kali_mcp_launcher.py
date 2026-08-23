@@ -19,6 +19,7 @@ MOUNT_TARGETS = {
     "artifacts": ("/artifacts", True),
     "results": ("/results", False),
     "reports": ("/reports", False),
+    "secrets": ("/run/secrets", True),
 }
 
 
@@ -94,6 +95,9 @@ def build_docker_command(profile: str, image: str, mounts: Mapping[str, str]) ->
         "--rm",
         "-i",
         "--security-opt=no-new-privileges",
+        # No current MCP operation has demonstrated a need for an added
+        # capability. linux-full gains native host networking, while raw
+        # operations remain unavailable until a later test proves otherwise.
         "--cap-drop=ALL",
         "--read-only",
         f"--network={network}",

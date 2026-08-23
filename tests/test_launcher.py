@@ -56,6 +56,7 @@ class DockerArgumentTests(unittest.TestCase):
                 "artifacts": root,
                 "results": root,
                 "reports": root,
+                "secrets": root,
             }
             args = launcher.build_docker_command("linux-full", "kali-mcp-server:test", paths)
             mounts = [args[index + 1] for index, value in enumerate(args) if value == "--mount"]
@@ -64,6 +65,7 @@ class DockerArgumentTests(unittest.TestCase):
             self.assertIn(f"type=bind,src={resolved},dst=/artifacts,readonly", mounts)
             self.assertIn(f"type=bind,src={resolved},dst=/results", mounts)
             self.assertIn(f"type=bind,src={resolved},dst=/reports", mounts)
+            self.assertIn(f"type=bind,src={resolved},dst=/run/secrets,readonly", mounts)
 
     def test_missing_mount_and_unsafe_image_fail_readably(self):
         with self.assertRaisesRegex(launcher.LauncherError, "invalid_mount"):

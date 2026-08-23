@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A single-file MCP (Model Context Protocol) server exposing 42 Kali Linux security tools as MCP tools. An AI client (Warp, Claude Desktop) calls the tools; the server shells out to the underlying Kali binaries and returns formatted text. Everything lives in `kali_pentest_server.py`; the rest of the repo is docs and the Docker image that ships the tools.
+A single-file MCP (Model Context Protocol) server exposing 42 Kali Linux security tools as MCP tools. An AI client (Warp, Claude Desktop) calls the tools; the server shells out to the underlying Kali binaries and returns formatted text. MCP tool behavior lives in `kali_pentest_server.py`. Host-side Docker profile selection lives in the small `kali_mcp_launcher.py` module and its `scripts/kali-mcp` entry point.
 
 ## Commands
 
@@ -16,11 +16,14 @@ docker build -t kali-mcp-server:latest .
 python3 kali_pentest_server.py          # host: needs `pip install -r requirements.txt` + the Kali tools on PATH
 docker run --rm -i kali-mcp-server:latest   # container: has all tools
 
+# Run the dependency-free launcher tests
+python3 -m unittest discover -s tests -v
+
 # Count the registered tools (no deps needed)
 grep -c "@mcp.tool()" kali_pentest_server.py    # should match the "42 tools" claim
 ```
 
-No test suite, linter, or CI. Verify changes by building/running the image and exercising a tool through an MCP client, or with the grep count above. `python3 kali_pentest_server.py` on the host needs `pip install -r requirements.txt` (the `mcp` package) plus the Kali binaries on PATH — the container is the reliable environment.
+Container CI builds both supported architectures and runs the image verifier. Verify launcher changes with the unit suite; verify server/image changes by building and running the image verifier and exercising MCP initialization. `python3 kali_pentest_server.py` on the host needs `pip install -r requirements.txt` (the `mcp` package) plus the Kali binaries on PATH — the container is the reliable environment.
 
 ## Architecture
 
