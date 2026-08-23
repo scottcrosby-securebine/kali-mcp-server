@@ -174,6 +174,33 @@ class ScannerAdapterTests(unittest.TestCase):
             "trivy", "demo", "filesystem", stdout="", stderr="password: SUPERSECRET-COLON", returncode=2
         )
         self.assertNotIn("SUPERSECRET-COLON", response)
+
+    def test_authorization_and_multiword_secrets_are_fully_redacted(self):
+        output = {
+            "Results": [
+                {
+                    "Vulnerabilities": [
+                        {
+                            "VulnerabilityID": "CVE-FIXTURE",
+                            "Title": "Authorization: Basic dXNlcjpTVVBFUlNFQ1JFVA==",
+                        }
+                    ]
+                }
+            ]
+        }
+        _, _, files = self.invoke("trivy", "demo", "filesystem", stdout=json.dumps(output))
+        self.assertNotIn("dXNlcjpTVVBFUlNFQ1JFVA==", files[0][1])
+        self.assertIn("CVE-FIXTURE", files[0][1])
+
+        response, _, files = self.invoke(
+            "trivy",
+            "demo",
+            "filesystem",
+            stdout="",
+            stderr="password: correct horse battery staple",
+            returncode=2,
+        )
+        self.assertNotIn("correct horse battery staple", response)
         self.assertFalse(files)
 
     def test_existing_result_is_never_overwritten(self):
