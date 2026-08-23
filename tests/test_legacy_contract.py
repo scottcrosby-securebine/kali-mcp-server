@@ -56,6 +56,11 @@ class LegacyToolContractTests(unittest.TestCase):
         ]
         registered = [function.__name__ for function in self.mcp.tools]
         self.assertEqual(expected, registered)
+        self.assertEqual(
+            [getattr(self.server, name) for name in expected],
+            self.mcp.tools,
+            "registered tools must be the module's analyzed callables",
+        )
 
     def test_default_invocation_returns_string_without_subprocess(self):
         with patch.object(self.server, "run_command") as run_command:
@@ -67,11 +72,17 @@ class LegacyToolContractTests(unittest.TestCase):
 
     def test_composite_call_graph_matches_contract_and_excludes_explicit_only(self):
         module = ast.parse(SERVER_PATH.read_text(encoding="utf-8"))
-        definitions = {
-            node.name: node
+        function_definitions = [
+            node
             for node in module.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
+        ]
+        self.assertEqual(
+            len(function_definitions),
+            len({node.name for node in function_definitions}),
+            "top-level server function names must be unique",
+        )
+        definitions = {node.name: node for node in function_definitions}
         public_names = {
             tool["name"]
             for tool in self.contract["tools"] + self.contract["additions"]
