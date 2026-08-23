@@ -38,6 +38,29 @@ for binary in ${required_binaries}; do
 done
 
 python3 - <<'PY'
+import hashlib
+import json
+from pathlib import Path
+
+root = Path("/usr/local/share/kali-mcp/nuclei-templates")
+manifest_path = root / "manifest.json"
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+if manifest.get("schema_version") != 1 or not manifest.get("upstream_version"):
+    raise SystemExit("invalid pinned Nuclei template manifest")
+for entry in manifest.get("templates", []):
+    template = (root / "promoted" / entry["path"]).resolve(strict=True)
+    if not template.is_relative_to((root / "promoted").resolve()):
+        raise SystemExit(f"Nuclei template escapes promoted root: {entry['path']}")
+    actual = hashlib.sha256(template.read_bytes()).hexdigest()
+    if actual != entry["sha256"]:
+        raise SystemExit(
+            f"Nuclei template digest mismatch for {entry['path']}: "
+            f"expected {entry['sha256']}, got {actual}"
+        )
+print(f"verified pinned Nuclei templates: {manifest['upstream_version']}")
+PY
+
+python3 - <<'PY'
 import json
 import subprocess
 from pathlib import Path

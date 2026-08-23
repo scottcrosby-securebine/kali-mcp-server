@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Promote explicitly reviewed detection-only Nuclei templates into a staged set."""
+
+import argparse
+import hashlib
+import json
+import shutil
+import sys
+from pathlib import Path
+
+
+FORBIDDEN = (
+    "interactsh",
+    "javascript:",
+    "code:",
+    "headless:",
+    "workflow:",
+    "fuzzing:",
+    "file:",
+    "post ",
+    "put ",
+    "patch ",
+    "delete ",
+)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source", required=True, type=Path)
+    parser.add_argument("--destination", required=True, type=Path)
+    parser.add_argument("--version", required=True)
+    parser.add_argument("templates", nargs="+")
+    args = parser.parse_args()
+
+    source = args.source.resolve(strict=True)
+    if args.destination.exists():
+        raise ValueError("destination must not already exist")
+    promoted = args.destination / "promoted"
+    promoted.mkdir(parents=True)
+    entries = []
+    for reference in args.templates:
+        relative = Path(reference)
+        if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+            raise ValueError(f"invalid relative template path: {reference}")
+        candidate = (source / relative).resolve(strict=True)
+        if not candidate.is_relative_to(source) or not candidate.is_file():
+            raise ValueError(f"template escapes source root: {reference}")
+        content = candidate.read_bytes()
+        lowered = content.decode("utf-8").lower()
+        matched = next((token for token in FORBIDDEN if token in lowered), None)
+        if matched:
+            raise ValueError(f"template {reference} contains forbidden feature {matched!r}")
+        output = promoted / relative.name
+        shutil.copyfile(candidate, output)
+        entries.append(
+            {
+                "path": output.name,
+                "source_path": relative.as_posix(),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+        )
+
+    manifest = {
+        "schema_version": 1,
+        "upstream": "projectdiscovery/nuclei-templates",
+        "upstream_version": args.version,
+        "review_policy": "Explicit detection-only candidates; maintainer review required before replacing the repository set",
+        "templates": entries,
+    }
+    (args.destination / "manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, UnicodeError, ValueError) as error:
+        print(f"template update rejected: {error}", file=sys.stderr)
+        raise SystemExit(1)

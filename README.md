@@ -317,8 +317,10 @@ Once configured, you can ask Claude things like:
 | `sqlmap_scan` | SQL injection testing | `target`, `data`, `parameter` | `sqlmap_scan target="http://example.com/page?id=1"` |
 | `whatweb_scan` | Web technology fingerprinting | `target`, `aggression` | `whatweb_scan target="example.com" aggression="1"` |
 | `wafw00f_scan` | WAF detection | `target` | `wafw00f_scan target="http://example.com"` |
-| `nuclei_scan` | Template-based vulnerability scanner | `target`, `templates`, `severity` | `nuclei_scan target="http://example.com" severity="high"` |
+| `nuclei_scan` | Bounded website CVE scanner using pinned promoted templates | `target`, `templates`, `severity` | `nuclei_scan target="http://example.com" severity="high"` |
 | `web_headers` | HTTP header analysis | `target` | `web_headers target="http://example.com"` |
+
+Nuclei defaults to the reviewed template set in `nuclei-templates/manifest.json`, runs at 10 requests/second with concurrency 5, and disables OAST, cloud upload, update checks, code, JavaScript, headless, file, fuzz/DAST, and workflow template types. Explicit template values must name a promoted ID or relative path. Maintainers stage reviewed template changes with `scripts/update-nuclei-templates`; ordinary scans never update templates.
 
 ### SSL/TLS Testing (3 tools)
 

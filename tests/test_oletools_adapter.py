@@ -107,6 +107,7 @@ class OletoolsAdapterTests(unittest.TestCase):
             patch.object(self.server, "wafw00f_scan", child),
             patch.object(self.server, "web_headers", headers),
             patch.object(self.server, "nikto_scan", nikto),
+            patch.object(self.server, "nuclei_scan", child),
             patch.object(self.server, "sslscan_scan", child),
         ):
             response = asyncio.run(self.server.web_audit("https://example.test/start"))

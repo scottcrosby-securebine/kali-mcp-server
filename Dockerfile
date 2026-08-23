@@ -70,6 +70,7 @@ RUN sed -i 's|http://http.kali.org/kali/|http://kali.download/kali/|' /etc/apt/s
 
 COPY kali_pentest_server.py requirements.txt ./
 COPY tests/fixtures/legacy_tool_contract.json /usr/local/share/kali-mcp/legacy_tool_contract.json
+COPY nuclei-templates /usr/local/share/kali-mcp/nuclei-templates
 COPY scripts/verify-image.sh /usr/local/bin/verify-kali-mcp-image
 
 RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin pentest \

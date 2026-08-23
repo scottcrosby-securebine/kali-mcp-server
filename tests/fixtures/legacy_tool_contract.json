@@ -52,7 +52,7 @@
   "composites": {
     "quick_recon": ["nmap_scan", "whatweb_scan", "whois_lookup"],
     "full_recon": ["nmap_service_scan", "dns_enum", "subfinder_scan", "whatweb_scan", "sslscan_scan"],
-    "web_audit": ["whatweb_scan", "wafw00f_scan", "web_headers", "nikto_scan", "sslscan_scan"],
+    "web_audit": ["whatweb_scan", "wafw00f_scan", "web_headers", "nikto_scan", "nuclei_scan", "sslscan_scan"],
     "network_sweep": ["nmap_scan", "nbtscan_scan"]
   },
   "never_auto_chain": [

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "upstream": "projectdiscovery/nuclei-templates",
+  "upstream_version": "v10.4.7",
+  "review_policy": "HTTP detection only; no OAST, code, JavaScript, headless, file, fuzz/DAST, workflow, state-changing, or command-execution requests",
+  "templates": [
+    {
+      "id": "CVE-2021-41773",
+      "path": "CVE-2021-41773.yaml",
+      "sha256": "29f0b144f7e898332daf452a6705421accd962a4996bb0f3dd97695cb2025134",
+      "source_path": "http/cves/2021/CVE-2021-41773.yaml",
+      "review_note": "Promoted detection-only variant excludes the upstream command-execution POST request."
+    }
+  ]
+}

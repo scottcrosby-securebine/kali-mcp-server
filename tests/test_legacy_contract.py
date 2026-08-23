@@ -204,6 +204,7 @@ class LegacyToolContractTests(unittest.TestCase):
                     ("wafw00f_scan", ("https://example.test/path",)),
                     ("web_headers", ("https://example.test/path",)),
                     ("nikto_scan", ("https://example.test/path",)),
+                    ("nuclei_scan", ("https://example.test/path",)),
                     ("sslscan_scan", ("example.test",)),
                 ],
             ),
@@ -215,6 +216,7 @@ class LegacyToolContractTests(unittest.TestCase):
                     ("wafw00f_scan", ("http://example.test",)),
                     ("web_headers", ("http://example.test",)),
                     ("nikto_scan", ("http://example.test",)),
+                    ("nuclei_scan", ("http://example.test",)),
                 ],
             ),
             (
