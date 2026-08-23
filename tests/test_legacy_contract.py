@@ -91,34 +91,62 @@ class LegacyToolContractTests(unittest.TestCase):
         }
         module_functions = set(definitions)
         module_aliases = {}
-        assignment_statements = [
+        module_assignments = [
             statement
-            for scope in [module, *(node for node in module.body if isinstance(node, ast.ClassDef))]
-            for statement in scope.body
+            for statement in module.body
             if isinstance(statement, (ast.Assign, ast.AnnAssign))
             and statement.value is not None
         ]
-        direct_aliases = {}
-        for statement in assignment_statements:
+        class_assignments = [
+            statement
+            for class_definition in module.body
+            if isinstance(class_definition, ast.ClassDef)
+            for statement in class_definition.body
+            if isinstance(statement, (ast.Assign, ast.AnnAssign))
+            and statement.value is not None
+        ]
+        for statement in module_assignments:
             if not isinstance(statement.value, ast.Name):
                 continue
+            resolved = module_aliases.get(statement.value.id, statement.value.id)
             targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
             for target in targets:
                 if isinstance(target, ast.Name):
-                    direct_aliases[target.id] = statement.value.id
-        for alias in direct_aliases:
-            resolved = alias
-            seen = set()
-            while resolved in direct_aliases and resolved not in seen:
-                seen.add(resolved)
-                resolved = direct_aliases[resolved]
-            if resolved in module_functions:
-                module_aliases[alias] = resolved
+                    if resolved in module_functions:
+                        module_aliases[target.id] = resolved
+                    else:
+                        module_aliases.pop(target.id, None)
+        class_callable_aliases = set()
+        for class_definition in (
+            node for node in module.body if isinstance(node, ast.ClassDef)
+        ):
+            local_callable_aliases = set()
+            for statement in class_definition.body:
+                if not isinstance(statement, (ast.Assign, ast.AnnAssign)) or not isinstance(
+                    statement.value, ast.Name
+                ):
+                    continue
+                source = statement.value.id
+                if (
+                    module_aliases.get(source, source) not in module_functions
+                    and source not in local_callable_aliases
+                ):
+                    continue
+                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                local_callable_aliases.update(
+                    target.id for target in targets if isinstance(target, ast.Name)
+                )
+            class_callable_aliases.update(local_callable_aliases)
+        assignment_statements = module_assignments + class_assignments
         module_explicit_containers = set()
         changed = True
         while changed:
             changed = False
-            tainted = explicit_only | module_explicit_containers
+            tainted = (
+                explicit_only
+                | module_explicit_containers
+                | {alias for alias, resolved in module_aliases.items() if resolved in explicit_only}
+            )
             for statement in assignment_statements:
                 if any(
                     isinstance(node, ast.Name) and node.id in tainted
@@ -140,7 +168,7 @@ class LegacyToolContractTests(unittest.TestCase):
                     if isinstance(node.func, ast.Name):
                         called_names.add(module_aliases.get(node.func.id, node.func.id))
                     elif isinstance(node.func, ast.Attribute):
-                        called_names.add(module_aliases.get(node.func.attr, node.func.attr))
+                        called_names.add(node.func.attr)
                 if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
                     if node.id in explicit_only and node.id != function_name:
                         referenced_explicit.add(node.id)
@@ -151,6 +179,8 @@ class LegacyToolContractTests(unittest.TestCase):
                         referenced_explicit.add(node.attr)
                 elif isinstance(node, ast.Attribute) and node.attr in module_explicit_containers:
                     referenced_explicit.add(node.attr)
+                elif isinstance(node, ast.Attribute) and node.attr in class_callable_aliases:
+                    referenced_explicit.add(f"class-callable-alias:{node.attr}")
                 elif isinstance(node, ast.Constant) and node.value in explicit_only:
                     referenced_explicit.add(node.value)
                 if (
