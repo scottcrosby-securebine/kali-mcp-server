@@ -39,6 +39,26 @@ class ProfileCapabilityTests(unittest.TestCase):
                 )
                 run_command.assert_not_called()
 
+    def test_broadcast_selector_bypasses_are_rejected_before_execution(self):
+        selectors = (
+            "broadcast*",
+            "broadcast or safe",
+            "broadcast and safe",
+            "broadcast-dhcp-discover",
+            "/usr/share/nmap/scripts/broadcast-dhcp-discover.nse",
+        )
+        for selector in selectors:
+            with self.subTest(selector=selector), patch.object(server, "run_command") as run_command:
+                result = asyncio.run(server.nmap_script_scan("192.0.2.1", selector))
+                self.assertTrue(result.startswith("❌ Error: Unsupported NSE script category"))
+                run_command.assert_not_called()
+
+    def test_documented_comma_separated_categories_still_execute(self):
+        with patch.object(server, "run_command", return_value="ok") as run_command:
+            result = asyncio.run(server.nmap_script_scan("192.0.2.1", "safe,discovery"))
+            self.assertEqual("ok", result)
+            self.assertIn("--script=safe,discovery", run_command.call_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()
