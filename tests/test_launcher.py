@@ -104,6 +104,17 @@ class DockerArgumentTests(unittest.TestCase):
             finally:
                 host_socket.close()
 
+    def test_symlink_cannot_hide_comma_in_resolved_mount_path(self):
+        with tempfile.TemporaryDirectory() as parent:
+            comma_path = os.path.join(parent, "directory,with-comma")
+            os.mkdir(comma_path)
+            alias = os.path.join(parent, "safe-alias")
+            os.symlink(comma_path, alias)
+            with self.assertRaisesRegex(launcher.LauncherError, "invalid_mount"):
+                launcher.build_docker_command(
+                    "linux-full", "kali-mcp-server:test", {"workspace": alias}
+                )
+
     def test_ephemeral_output_mounts_are_used_when_not_persisted(self):
         args = launcher.build_docker_command("linux-full", "kali-mcp-server:test", {})
         tmpfs = [args[index + 1] for index, value in enumerate(args) if value == "--tmpfs"]

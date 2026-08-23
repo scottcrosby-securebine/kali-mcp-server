@@ -66,8 +66,6 @@ def select_profile(host: Host, requested: str | None) -> str:
 
 def _mount_value(name: str, host_path: str) -> str:
     target, read_only = MOUNT_TARGETS[name]
-    if "," in host_path:
-        raise LauncherError(f"invalid_mount: {name} path cannot contain a comma")
     path = Path(host_path).expanduser()
     try:
         resolved = path.resolve(strict=True)
@@ -75,6 +73,8 @@ def _mount_value(name: str, host_path: str) -> str:
         raise LauncherError(f"invalid_mount: {name} directory does not exist: {host_path}") from error
     if not resolved.is_dir():
         raise LauncherError(f"invalid_mount: {name} must be a directory: {host_path}")
+    if "," in str(resolved):
+        raise LauncherError(f"invalid_mount: {name} path cannot contain a comma")
     _reject_host_sockets(name, resolved)
     suffix = ",readonly" if read_only else ""
     return f"type=bind,src={resolved},dst={target}{suffix}"
