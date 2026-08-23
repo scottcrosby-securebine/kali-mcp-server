@@ -97,19 +97,38 @@ class LegacyToolContractTests(unittest.TestCase):
                 f"{function_name} must not auto-chain explicit-only tools",
             )
 
-        actual = {}
-        for tool_name in public_names:
-            calls = [
-                (node.lineno, node.func.id)
-                for node in ast.walk(definitions[tool_name])
+        direct_calls = {
+            function_name: {
+                node.func.id
+                for node in ast.walk(definition)
                 if isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
-                and node.func.id in public_names
-                and node.func.id != tool_name
-            ]
-            if calls:
-                actual[tool_name] = [name for _line, name in sorted(calls)]
-        self.assertEqual(self.contract["composites"], actual)
+                and node.func.id in definitions
+            }
+            for function_name, definition in definitions.items()
+        }
+        actual = {}
+        for tool_name in public_names:
+            boundaries = set()
+            visited = set()
+            pending = [tool_name]
+            while pending:
+                function_name = pending.pop()
+                if function_name in visited:
+                    continue
+                visited.add(function_name)
+                for called in direct_calls[function_name]:
+                    if called in public_names and called != tool_name:
+                        boundaries.add(called)
+                    elif called not in public_names:
+                        pending.append(called)
+            if boundaries:
+                actual[tool_name] = boundaries
+        expected = {
+            composite: set(calls)
+            for composite, calls in self.contract["composites"].items()
+        }
+        self.assertEqual(expected, actual)
 
     def _run_composite(self, composite, target, expected_calls):
         call_log = []
