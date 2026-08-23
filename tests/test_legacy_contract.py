@@ -83,6 +83,17 @@ class LegacyToolContractTests(unittest.TestCase):
             "top-level server function names must be unique",
         )
         definitions = {node.name: node for node in function_definitions}
+        for function_name, definition in definitions.items():
+            runtime_function = getattr(self.server, function_name)
+            self.assertTrue(callable(runtime_function))
+            self.assertEqual(
+                min(
+                    [definition.lineno]
+                    + [decorator.lineno for decorator in definition.decorator_list]
+                ),
+                runtime_function.__code__.co_firstlineno,
+                f"{function_name} runtime binding must match its analyzed definition",
+            )
         public_names = {
             tool["name"]
             for tool in self.contract["tools"] + self.contract["additions"]
@@ -92,6 +103,16 @@ class LegacyToolContractTests(unittest.TestCase):
         self.assertFalse(
             any(isinstance(node, (ast.ClassDef, ast.Lambda)) for node in ast.walk(module)),
             "the server contract permits top-level functions only",
+        )
+        self.assertFalse(
+            any(
+                isinstance(node, ast.Name)
+                and isinstance(node.ctx, (ast.Store, ast.Del))
+                and node.id in definitions
+                or isinstance(node, ast.arg) and node.arg in definitions
+                for node in ast.walk(module)
+            ),
+            "server function names must not be rebound or shadowed",
         )
 
         parents = {
