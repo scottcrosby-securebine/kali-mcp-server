@@ -182,7 +182,7 @@ class ScannerAdapterTests(unittest.TestCase):
                     "Vulnerabilities": [
                         {
                             "VulnerabilityID": "CVE-FIXTURE",
-                            "Title": "Authorization: Basic dXNlcjpTVVBFUlNFQ1JFVA==",
+                            "Title": "Authorization: Basic dXNlcjpTVVBFUlNFQ1JFVA==\nscan continued",
                         }
                     ]
                 }
@@ -197,10 +197,11 @@ class ScannerAdapterTests(unittest.TestCase):
             "demo",
             "filesystem",
             stdout="",
-            stderr="password: correct horse battery staple",
+            stderr="password: correct horse battery staple\nscanner aborted",
             returncode=2,
         )
         self.assertNotIn("correct horse battery staple", response)
+        self.assertIn("scanner aborted", response)
         self.assertFalse(files)
 
     def test_existing_result_is_never_overwritten(self):
