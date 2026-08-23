@@ -83,15 +83,42 @@ class LegacyToolContractTests(unittest.TestCase):
         self.assertTrue(chained.isdisjoint(self.contract["never_auto_chain"]))
 
         explicit_only = set(self.contract["never_auto_chain"])
-        for tool_name in legacy_names:
-            chained_explicit_tools = {
-                node.func.id
-                for node in ast.walk(definitions[tool_name])
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id in explicit_only
-                and node.func.id != tool_name
-            }
+        public_names = legacy_names | {
+            tool["name"] for tool in self.contract["additions"]
+        }
+        module_functions = set(definitions)
+        call_graph = {}
+        explicit_references = {}
+        for function_name, definition in definitions.items():
+            called_names = set()
+            referenced_explicit = set()
+            for node in ast.walk(definition):
+                if isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Name):
+                        called_names.add(node.func.id)
+                    elif isinstance(node.func, ast.Attribute):
+                        called_names.add(node.func.attr)
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                    if node.id in explicit_only and node.id != function_name:
+                        referenced_explicit.add(node.id)
+                elif isinstance(node, ast.Attribute) and node.attr in explicit_only:
+                    if node.attr != function_name:
+                        referenced_explicit.add(node.attr)
+            call_graph[function_name] = called_names & module_functions
+            explicit_references[function_name] = referenced_explicit
+
+        for tool_name in public_names - explicit_only:
+            reachable = set()
+            pending = [tool_name]
+            while pending:
+                function_name = pending.pop()
+                if function_name in reachable:
+                    continue
+                reachable.add(function_name)
+                pending.extend(call_graph.get(function_name, set()) - reachable)
+            chained_explicit_tools = set().union(
+                *(explicit_references.get(function_name, set()) for function_name in reachable)
+            )
             self.assertEqual(
                 set(),
                 chained_explicit_tools,
