@@ -82,10 +82,31 @@ class LegacyToolContractTests(unittest.TestCase):
         chained = {name for calls in actual.values() for name in calls}
         self.assertTrue(chained.isdisjoint(self.contract["never_auto_chain"]))
 
+        explicit_only = set(self.contract["never_auto_chain"])
+        for tool_name in legacy_names:
+            chained_explicit_tools = {
+                node.func.id
+                for node in ast.walk(definitions[tool_name])
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in explicit_only
+                and node.func.id != tool_name
+            }
+            self.assertEqual(
+                set(),
+                chained_explicit_tools,
+                f"{tool_name} must not auto-chain explicit-only tools",
+            )
+
     def _run_composite(self, composite, target, expected_calls):
         call_log = []
         with ExitStack() as stack:
-            for dependency in self.contract["composites"][composite]:
+            public_tools = [
+                tool["name"]
+                for tool in self.contract["tools"] + self.contract["additions"]
+                if tool["name"] != composite
+            ]
+            for dependency in public_tools:
                 replacement = AsyncMock(
                     side_effect=lambda *args, _name=dependency: call_log.append((_name, args)) or _name
                 )
