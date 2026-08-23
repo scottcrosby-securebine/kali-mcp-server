@@ -38,11 +38,12 @@ async def some_scan(target: str = "", ...) -> str:
     return run_command(cmd, timeout=TIMEOUT_*)
 ```
 
-Three shared helpers in `kali_pentest_server.py` carry all the real logic:
+Shared helpers in `kali_pentest_server.py` carry the cross-tool logic:
 
 - `run_command(cmd_list, timeout)` — the only place a subprocess runs. Uses `subprocess.run` with an **argument list** (no `shell=True`), merges stdout+stderr, truncates to `MAX_OUTPUT_LINES` (200), and wraps the result in a status string (✅/⚠️/❌/⏱️). All error handling (timeout, missing binary, exceptions) lives here, not in the tools.
 - `validate_target(s)` — length/empty guard. Called by nearly every tool.
 - `sanitize_input(s)` — `shlex.quote` wrapper. Present but rarely needed: because commands are passed as arg lists, shell metacharacters are already inert. Don't add `shell=True` and then reason about quoting — keep the list form.
+- `capability_missing(operation, capability)` — stable readable response for an operation the active Docker profile cannot support. Return this before calling `run_command`.
 
 Combined-operation tools (`quick_recon`, `full_recon`, `web_audit`, `network_sweep`) don't spawn subprocesses directly — they `await` the other tool functions and concatenate the formatted output. Timeouts are tiered constants (`TIMEOUT_SHORT`=60s … `TIMEOUT_EXTRA_LONG`=1800s); pick the tier by expected scan length.
 
