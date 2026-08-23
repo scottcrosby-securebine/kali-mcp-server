@@ -128,6 +128,7 @@ class NucleiAdapterTests(unittest.TestCase):
         child = unittest.mock.AsyncMock(return_value=long_stage)
         headers = unittest.mock.AsyncMock(return_value="headers")
         complete_findings = [{"template-id": f"finding-{index}"} for index in range(250)]
+        complete_findings[0]["name"] = '<script>alert("x")</script>'
         nuclei = unittest.mock.AsyncMock(
             return_value=self.server.NucleiScanText("nuclei complete", complete_findings)
         )
@@ -142,7 +143,10 @@ class NucleiAdapterTests(unittest.TestCase):
         ):
             result = asyncio.run(self.server.web_audit("https://example.test"))
         self.assertLessEqual(len(result.splitlines()), self.server.MAX_OUTPUT_LINES)
-        self.assertEqual(complete_findings, result.report_data["nuclei_findings"])
+        self.assertEqual(250, len(result.report_data["nuclei_findings"]))
+        rendered = json.dumps(result.report_data["nuclei_findings"])
+        self.assertNotIn("<script>", rendered)
+        self.assertIn("&lt;script&gt;", rendered)
 
     def test_failed_or_malformed_nuclei_output_fails_readably_without_raw_secrets(self):
         cases = (
@@ -181,7 +185,7 @@ class NucleiAdapterTests(unittest.TestCase):
             self.assertEqual(["safe.yaml"], [item["path"] for item in manifest["templates"]])
 
             (source / "unsafe.yaml").write_text(
-                "id: unsafe\nhttp:\n  - raw:\n      - |\n        POST /change HTTP/1.1\n",
+                "id: unsafe\nhttp:\n  - method: POST\n    path: ['{{BaseURL}}/change']\n",
                 encoding="utf-8",
             )
             rejected = subprocess.run(

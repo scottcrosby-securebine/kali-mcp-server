@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -17,10 +18,11 @@ FORBIDDEN = (
     "workflow:",
     "fuzzing:",
     "file:",
-    "post ",
-    "put ",
-    "patch ",
-    "delete ",
+)
+
+FORBIDDEN_REQUESTS = (
+    re.compile(r"(?im)^\s*(?:-\s*)?method\s*:\s*(?:post|put|patch|delete)\s*$"),
+    re.compile(r"(?im)^\s*(?:post|put|patch|delete)\s+\S+\s+http/"),
 )
 
 
@@ -50,6 +52,8 @@ def main() -> int:
         matched = next((token for token in FORBIDDEN if token in lowered), None)
         if matched:
             raise ValueError(f"template {reference} contains forbidden feature {matched!r}")
+        if any(pattern.search(lowered) for pattern in FORBIDDEN_REQUESTS):
+            raise ValueError(f"template {reference} contains a forbidden mutating request")
         output = promoted / relative.name
         shutil.copyfile(candidate, output)
         entries.append(

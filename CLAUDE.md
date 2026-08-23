@@ -40,7 +40,9 @@ async def some_scan(target: str = "", ...) -> str:
 
 Shared helpers in `kali_pentest_server.py` carry the cross-tool logic:
 
-- `run_command(cmd_list, timeout)` — the only place a subprocess runs. Uses `subprocess.run` with an **argument list** (no `shell=True`), merges stdout+stderr, truncates to `MAX_OUTPUT_LINES` (200), and wraps the result in a status string (✅/⚠️/❌/⏱️). All error handling (timeout, missing binary, exceptions) lives here, not in the tools.
+- `execute_command(cmd_list, timeout, ...)` — the only place `subprocess.run` is called. It always uses an **argument list** (no `shell=True`) and returns the structured process result. Both public-output and structured adapters use this seam.
+- `run_command(cmd_list, timeout)` — the legacy text adapter. It calls `execute_command`, merges stdout+stderr, truncates to `MAX_OUTPUT_LINES` (200), and wraps the result in a status string (✅/⚠️/❌/⏱️).
+- Structured scanner adapters may call `execute_command` through a scanner-specific helper when they must parse complete JSON/JSONL before applying the public 200-line bound. Timeout, start, failure, parsing, and redaction behavior stays centralized in that helper rather than the public tool wrapper.
 - `validate_target(s)` — length/empty guard. Called by nearly every tool.
 - `sanitize_input(s)` — `shlex.quote` wrapper. Present but rarely needed: because commands are passed as arg lists, shell metacharacters are already inert. Don't add `shell=True` and then reason about quoting — keep the list form.
 - `capability_missing(operation, capability)` — stable readable response for an operation the active Docker profile cannot support. Return this before calling `run_command`.
@@ -59,7 +61,7 @@ The image runs as non-root user `pentest` under Docker MCP Gateway with `--secur
 
 ## Adding or changing a tool
 
-Match the existing pattern exactly: `@mcp.tool()` async fn, params default to `""`, one-line docstring, validate → build arg list → `run_command`, return the string. New tools must not need raw sockets or root, and their binary must be installed in the `Dockerfile` (grouped by category). Update the README tool table and bump the "42 tools" count in the README and the startup log banner.
+Match the existing pattern exactly: `@mcp.tool()` async fn, params default to `""`, one-line docstring, validate → build arg list → text or structured adapter, return the string. Use `run_command` for legacy text output; use a shared structured helper only when complete machine-readable output must be parsed before bounding the public response. New tools must not need raw sockets or root, and their binary must be installed in the `Dockerfile` (grouped by category). Update the README tool table and the preserved/additions catalog wording when adding a public call.
 
 ## Agent skills
 
