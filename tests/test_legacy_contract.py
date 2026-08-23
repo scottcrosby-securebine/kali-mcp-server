@@ -37,6 +37,10 @@ class LegacyToolContractTests(unittest.TestCase):
                 self.assertEqual({"name", "default"}, set(parameter))
                 self.assertIsInstance(parameter["default"], str)
 
+    def test_sanitize_input_preserves_nonempty_legacy_behavior(self):
+        self.assertEqual("example.com", self.server.sanitize_input(" example.com "))
+        self.assertEqual("'value with spaces'", self.server.sanitize_input("value with spaces"))
+
     def test_every_declared_signature_matches_exactly(self):
         for expected in self.contract["tools"] + self.contract["additions"]:
             with self.subTest(tool=expected["name"]):
