@@ -132,36 +132,78 @@ class LegacyToolContractTests(unittest.TestCase):
                     module_callable_targets.setdefault(target.id, set()).update(
                         referenced_targets
                     )
-        mutating_methods = {"append", "extend", "insert", "update", "setdefault"}
-        for statement in module.body:
-            if not (
-                isinstance(statement, ast.Expr)
-                and isinstance(statement.value, ast.Call)
-                and isinstance(statement.value.func, ast.Attribute)
-                and statement.value.func.attr in mutating_methods
-                and isinstance(statement.value.func.value, ast.Name)
-            ):
+        object_aliases = {}
+        for statement in module_assignments:
+            if not isinstance(statement.value, ast.Name):
                 continue
+            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    object_aliases.setdefault(target.id, set()).add(statement.value.id)
+                    object_aliases.setdefault(statement.value.id, set()).add(target.id)
+
+        def aliased_names(name):
+            found = set()
+            pending = [name]
+            while pending:
+                candidate = pending.pop()
+                if candidate in found:
+                    continue
+                found.add(candidate)
+                pending.extend(object_aliases.get(candidate, set()) - found)
+            return found
+
+        def callable_references(nodes):
             referenced_targets = set()
             for reference in (
                 node.id
-                for argument in [*statement.value.args, *(keyword.value for keyword in statement.value.keywords)]
-                for node in ast.walk(argument)
+                for value in nodes
+                for node in ast.walk(value)
                 if isinstance(node, ast.Name)
             ):
                 referenced_targets.update(module_callable_targets.get(reference, set()))
                 resolved = module_aliases.get(reference, reference)
                 if resolved in module_functions:
                     referenced_targets.add(resolved)
-            module_callable_targets.setdefault(
-                statement.value.func.value.id, set()
-            ).update(referenced_targets)
+            return referenced_targets
+
+        mutating_methods = {"add", "append", "extend", "insert", "update", "setdefault"}
+        for expression in (
+            node.value
+            for node in ast.walk(module)
+            if isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr in mutating_methods
+            and isinstance(node.value.func.value, ast.Name)
+        ):
+            referenced_targets = callable_references(
+                [*expression.args, *(keyword.value for keyword in expression.keywords)]
+            )
+            for container_name in aliased_names(expression.func.value.id):
+                module_callable_targets.setdefault(container_name, set()).update(
+                    referenced_targets
+                )
+        for statement in (
+            node
+            for node in ast.walk(module)
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            and node.value is not None
+        ):
+            referenced_targets = callable_references([statement.value])
+            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+            for target in targets:
+                if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+                    for container_name in aliased_names(target.value.id):
+                        module_callable_targets.setdefault(container_name, set()).update(
+                            referenced_targets
+                        )
         class_callable_aliases = set()
         for class_definition in (
             node for node in module.body if isinstance(node, ast.ClassDef)
         ):
             local_callable_aliases = set()
-            for statement in class_definition.body:
+            for statement in ast.walk(class_definition):
                 if not isinstance(statement, (ast.Assign, ast.AnnAssign)) or statement.value is None:
                     continue
                 referenced_targets = set()
@@ -179,7 +221,7 @@ class LegacyToolContractTests(unittest.TestCase):
                     target.id for target in targets if isinstance(target, ast.Name)
                 )
             class_callable_aliases.update(local_callable_aliases)
-            for statement in class_definition.body:
+            for statement in ast.walk(class_definition):
                 if not (
                     isinstance(statement, ast.Expr)
                     and isinstance(statement.value, ast.Call)
@@ -196,6 +238,24 @@ class LegacyToolContractTests(unittest.TestCase):
                     if isinstance(node, ast.Name)
                 ):
                     class_callable_aliases.add(statement.value.func.value.id)
+            for statement in ast.walk(class_definition):
+                if not (
+                    isinstance(statement, (ast.Assign, ast.AnnAssign))
+                    and statement.value is not None
+                ):
+                    continue
+                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                if any(
+                    isinstance(target, ast.Subscript)
+                    and isinstance(target.value, ast.Name)
+                    for target in targets
+                ) and callable_references([statement.value]):
+                    class_callable_aliases.update(
+                        target.value.id
+                        for target in targets
+                        if isinstance(target, ast.Subscript)
+                        and isinstance(target.value, ast.Name)
+                    )
         assignment_statements = module_assignments + class_assignments
         module_explicit_containers = set()
         changed = True
