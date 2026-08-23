@@ -111,49 +111,44 @@ class LegacyToolContractTests(unittest.TestCase):
                 f"{function_name} must not auto-chain explicit-only tools",
             )
 
+        direct_calls = {
+            function_name: [
+                name
+                for _line, name in sorted(
+                    (node.lineno, node.func.id)
+                    for node in ast.walk(definition)
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id in definitions
+                )
+            ]
+            for function_name, definition in definitions.items()
+        }
         public_call_graph = {}
         for tool_name in public_names:
-            awaited = [
-                node.value
-                for node in ast.walk(definitions[tool_name])
-                if isinstance(node, ast.Await)
-            ]
-            for call in awaited:
-                self.assertIsInstance(call, ast.Call, f"{tool_name} must await a direct tool call")
-                self.assertIsInstance(
-                    call.func,
-                    ast.Name,
-                    f"{tool_name} must not dispatch awaited calls indirectly",
-                )
-                self.assertNotIn(
-                    call.func.id,
-                    explicit_only,
-                    f"{tool_name} must not auto-chain explicit-only tools",
-                )
-            public_calls = [
-                (call.lineno, call.func.id)
-                for call in awaited
-                if call.func.id in public_names
-            ]
+            boundaries = []
+            visited = set()
+            pending = [tool_name]
+            while pending:
+                function_name = pending.pop(0)
+                if function_name in visited:
+                    continue
+                visited.add(function_name)
+                for called in direct_calls[function_name]:
+                    if called in public_names and called != tool_name:
+                        boundaries.append(called)
+                    else:
+                        pending.append(called)
+            if boundaries:
+                public_call_graph[tool_name] = boundaries
             if tool_name in self.contract["composites"]:
-                self.assertEqual(len(awaited), len(public_calls))
-            if public_calls:
-                public_call_graph[tool_name] = [
-                    name for _line, name in sorted(public_calls)
-                ]
+                self.assertNotIn(
+                    "run_command",
+                    visited,
+                    f"{tool_name} must delegate through public tool wrappers",
+                )
 
         self.assertEqual(self.contract["composites"], public_call_graph)
-
-        for composite in self.contract["composites"]:
-            self.assertNotIn(
-                "run_command",
-                {
-                    node.func.id
-                    for node in ast.walk(definitions[composite])
-                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                },
-                f"{composite} must delegate through public tool wrappers",
-            )
 
     def _run_composite(self, composite, target, expected_calls):
         call_log = []
