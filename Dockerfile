@@ -70,6 +70,7 @@ RUN sed -i 's|http://http.kali.org/kali/|http://kali.download/kali/|' /etc/apt/s
 
 COPY kali_pentest_server.py requirements.txt ./
 COPY tests/fixtures/legacy_tool_contract.json /usr/local/share/kali-mcp/legacy_tool_contract.json
+COPY docker/packages.lock /usr/local/share/kali-mcp/packages.lock
 COPY nuclei-templates /usr/local/share/kali-mcp/nuclei-templates
 COPY scripts/verify-image.sh /usr/local/bin/verify-kali-mcp-image
 

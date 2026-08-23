@@ -38,6 +38,10 @@ class ReportTests(unittest.TestCase):
                 response = asyncio.run(self.server.generate_report(result_id, "html"))
                 self.assertEqual(f"/reports/{'B' * 32}.html", response)
                 self.assertEqual([f"{'B' * 32}.html"], [item.name for item in reports.iterdir()])
+                self.assertIn(
+                    "0.66.0-0kali1",
+                    (reports / f"{'B' * 32}.html").read_text(encoding="utf-8"),
+                )
 
                 for invalid_ref, invalid_format in (
                     ("", "html"),
@@ -73,6 +77,8 @@ class ReportTests(unittest.TestCase):
                     "Severity": "HIGH",
                     "Evidence": "Authorization: Bearer REPORT-SECRET",
                     "PrivateMaterial": "-----BEGIN PRIVATE KEY-----\nPEM-SECRET\n-----END PRIVATE KEY-----",
+                    "Tokens": "Basic dXNlcjpwYXNz ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
+                    "Database": "mongodb://admin:DB-SECRET@example.test/app",
                     "Remediation": "Upgrade package",
                 },
                 {"VulnerabilityID": "CVE-TEST-2", "Severity": "HIGH"},
@@ -105,7 +111,7 @@ class ReportTests(unittest.TestCase):
                 self.assertIn(heading, report)
             for retained in ("demo&lt;&amp;", "CVE-TEST-1", "Upgrade package", "0.66.0", "2026-08-24"):
                 self.assertIn(retained, report)
-            for forbidden in ("<script", "REPORT-SECRET", "PEM-SECRET", "<img", "<iframe"):
+            for forbidden in ("<script", "REPORT-SECRET", "PEM-SECRET", "dXNlcjpwYXNz", "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", "DB-SECRET", "<img", "<iframe"):
                 self.assertNotIn(forbidden, report)
             self.assertNotIn("<script", report.lower())
             self.assertIn("Content-Security-Policy", report)
@@ -168,6 +174,7 @@ class ReportTests(unittest.TestCase):
             ("success", {name: f"✅ {name} ok" for name in stages}, True),
             ("partial", {**{name: f"✅ {name} ok" for name in stages}, "dns_enum": "❌ Error: dns failed"}, True),
             ("failed", {name: f"❌ Error: {name} failed" for name in stages}, False),
+            ("failed", {name: "⚠️ Scan completed with warnings (return code: 2)" for name in stages}, False),
         )
         for status, outputs, expects_report in cases:
             with self.subTest(status=status), tempfile.TemporaryDirectory() as root_text:
@@ -200,7 +207,7 @@ class ReportTests(unittest.TestCase):
 
     def test_web_audit_writes_one_bounded_report_with_complete_nuclei_findings(self):
         findings = [{"template-id": f"finding-{index}", "name": "safe"} for index in range(250)]
-        findings[-1]["name"] = "beyond-public-bound"
+        findings[-1]["name"] = "A" * 4000 + "beyond-public-bound"
         nuclei_result = self.server.NucleiScanText("\n".join(["✅ nuclei"] * 250), findings)
         with tempfile.TemporaryDirectory() as root_text:
             reports = Path(root_text) / "reports"
