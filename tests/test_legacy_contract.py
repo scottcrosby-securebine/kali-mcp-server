@@ -56,7 +56,7 @@ class LegacyToolContractTests(unittest.TestCase):
 
     def test_default_invocation_returns_string_without_subprocess(self):
         with patch.object(self.server, "run_command") as run_command:
-            for expected in self.contract["tools"]:
+            for expected in self.contract["tools"] + self.contract["additions"]:
                 with self.subTest(tool=expected["name"]):
                     result = asyncio.run(getattr(self.server, expected["name"])())
                     self.assertIsInstance(result, str)
@@ -87,6 +87,17 @@ class LegacyToolContractTests(unittest.TestCase):
             tool["name"] for tool in self.contract["additions"]
         }
         module_functions = set(definitions)
+        module_aliases = {}
+        for statement in module.body:
+            if (
+                isinstance(statement, (ast.Assign, ast.AnnAssign))
+                and isinstance(statement.value, ast.Name)
+                and statement.value.id in module_functions
+            ):
+                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        module_aliases[target.id] = statement.value.id
         call_graph = {}
         explicit_references = {}
         for function_name, definition in definitions.items():
@@ -95,7 +106,7 @@ class LegacyToolContractTests(unittest.TestCase):
             for node in ast.walk(definition):
                 if isinstance(node, ast.Call):
                     if isinstance(node.func, ast.Name):
-                        called_names.add(node.func.id)
+                        called_names.add(module_aliases.get(node.func.id, node.func.id))
                     elif isinstance(node.func, ast.Attribute):
                         called_names.add(node.func.attr)
                 if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
@@ -104,6 +115,8 @@ class LegacyToolContractTests(unittest.TestCase):
                 elif isinstance(node, ast.Attribute) and node.attr in explicit_only:
                     if node.attr != function_name:
                         referenced_explicit.add(node.attr)
+                elif isinstance(node, ast.Constant) and node.value in explicit_only:
+                    referenced_explicit.add(node.value)
             call_graph[function_name] = called_names & module_functions
             explicit_references[function_name] = referenced_explicit
 
