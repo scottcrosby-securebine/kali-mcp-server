@@ -97,6 +97,22 @@ class LegacyToolContractTests(unittest.TestCase):
             )
 
         for function_name, definition in definitions.items():
+            for node in ast.walk(definition):
+                if not isinstance(node, ast.Call):
+                    continue
+                self.assertIsInstance(
+                    node.func,
+                    (ast.Name, ast.Attribute),
+                    f"{function_name} must not dispatch calls indirectly",
+                )
+                if isinstance(node.func, ast.Attribute):
+                    self.assertNotIn(
+                        node.func.attr,
+                        definitions,
+                        f"{function_name} must call server functions by name",
+                    )
+
+        for function_name, definition in definitions.items():
             chained_explicit_tools = {
                 node.id
                 for node in ast.walk(definition)
@@ -126,25 +142,30 @@ class LegacyToolContractTests(unittest.TestCase):
         }
         public_call_graph = {}
         for tool_name in public_names:
-            boundaries = []
-            visited = set()
-            pending = [tool_name]
-            while pending:
-                function_name = pending.pop(0)
-                if function_name in visited:
-                    continue
-                visited.add(function_name)
+            reachable = set()
+
+            def expand(function_name, active):
+                self.assertNotIn(
+                    function_name,
+                    active,
+                    f"{tool_name} helper call graph must not be recursive",
+                )
+                reachable.add(function_name)
+                boundaries = []
                 for called in direct_calls[function_name]:
                     if called in public_names and called != tool_name:
                         boundaries.append(called)
                     else:
-                        pending.append(called)
+                        boundaries.extend(expand(called, active | {function_name}))
+                return boundaries
+
+            boundaries = expand(tool_name, set())
             if boundaries:
                 public_call_graph[tool_name] = boundaries
             if tool_name in self.contract["composites"]:
                 self.assertNotIn(
                     "run_command",
-                    visited,
+                    reachable,
                     f"{tool_name} must delegate through public tool wrappers",
                 )
 
