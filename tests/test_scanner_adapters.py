@@ -36,10 +36,10 @@ class ScannerAdapterTests(unittest.TestCase):
 
     def test_every_trivy_source_has_an_exact_daemonless_command(self):
         cases = (
-            ("filesystem", "demo", ["trivy", "filesystem", "--format", "json", "--no-progress", "--skip-db-update", "/workspace/demo"]),
-            ("sbom", "bom.json", ["trivy", "sbom", "--format", "json", "--no-progress", "--skip-db-update", "/workspace/bom.json"]),
-            ("archive", "image.tar", ["trivy", "image", "--input", "/artifacts/image.tar", "--format", "json", "--no-progress", "--skip-db-update"]),
-            ("registry", "registry.example/demo:1", ["trivy", "image", "--image-src", "remote", "--format", "json", "--no-progress", "--skip-db-update", "registry.example/demo:1"]),
+            ("filesystem", "demo", ["trivy", "--cache-dir", "/tmp/trivy-cache", "filesystem", "--format", "json", "--no-progress", "--disable-telemetry", "/workspace/demo"]),
+            ("sbom", "bom.json", ["trivy", "--cache-dir", "/tmp/trivy-cache", "sbom", "--format", "json", "--no-progress", "--disable-telemetry", "/workspace/bom.json"]),
+            ("archive", "image.tar", ["trivy", "--cache-dir", "/tmp/trivy-cache", "image", "--input", "/artifacts/image.tar", "--format", "json", "--no-progress", "--disable-telemetry"]),
+            ("registry", "registry.example/demo:1", ["trivy", "--cache-dir", "/tmp/trivy-cache", "image", "--image-src", "remote", "--format", "json", "--no-progress", "--disable-telemetry", "registry.example/demo:1"]),
         )
         for source, target, expected in cases:
             with self.subTest(source=source):
@@ -112,6 +112,17 @@ class ScannerAdapterTests(unittest.TestCase):
         self.assertEqual("trivy", normalized["scanner"])
         self.assertEqual("success", normalized["status"])
         self.assertTrue(normalized["findings"])
+
+    def test_syft_supported_output_shapes_normalize_findings(self):
+        outputs = (
+            {"artifacts": [{"name": "syft-package"}]},
+            {"components": [{"name": "cyclonedx-package"}]},
+            {"packages": [{"name": "spdx-package"}]},
+        )
+        for output in outputs:
+            with self.subTest(keys=tuple(output)):
+                _, _, files = self.invoke("syft", "demo", "dir", stdout=json.dumps(output))
+                self.assertTrue(json.loads(files[0][1])["findings"])
 
     def test_failure_malformed_and_truncated_output_create_no_result(self):
         cases = (

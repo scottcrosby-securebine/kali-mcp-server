@@ -2,7 +2,7 @@
 
 **Kali Linux Penetration Testing MCP Server v2**
 
-A comprehensive Model Context Protocol (MCP) server providing 42 professional-grade security testing tools from Kali Linux, optimized for ARM64 (Apple Silicon) Macs and Docker MCP Gateway.
+A comprehensive Model Context Protocol (MCP) server preserving 42 professional-grade Kali security calls and adding daemonless container scanners, optimized for Linux and Apple Silicon Docker hosts.
 
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue)](https://www.docker.com/)
 [![ARM64](https://img.shields.io/badge/ARM64-Optimized-green)](https://www.apple.com/mac/)
@@ -70,7 +70,7 @@ This MCP server provides powerful penetration testing and security assessment to
 
 This MCP server provides AI assistants like Claude with access to professional penetration testing tools for authorized security assessments. It includes:
 
-- **42 Security Tools** organized into 8 categories
+- **42 preserved security calls plus 2 daemonless scanners**
 - **ARM64 Optimized** for Apple Silicon Macs (M1/M2/M3)
 - **Docker MCP Compatible** - runs securely without raw socket access
 - **Input Sanitization** - prevents command injection attacks
@@ -89,6 +89,7 @@ This MCP server provides AI assistants like Claude with access to professional p
 | **Vulnerability Research** | 3 tools - searchsploit, Metasploit search/info, nuclei |
 | **OSINT** | 2 tools - theHarvester, whois lookups |
 | **Combined Operations** | 4 multi-tool workflows for comprehensive assessments |
+| **Container & Artifact Scanning** | 2 daemonless tools for mounted sources, archives, SBOMs, and public registries |
 
 ---
 
@@ -121,13 +122,14 @@ This MCP server provides AI assistants like Claude with access to professional p
 │  └──────────────────────┬───────────────────────────────┘  │
 │                         │                                   │
 │  ┌──────────────────────▼───────────────────────────────┐  │
-│  │ Security Tools (42):                                 │  │
+│  │ Security Tools (42 preserved calls + additions):     │  │
 │  │ • nmap (6 variants), dnsrecon, subfinder, amass     │  │
 │  │ • nikto, wpscan, sqlmap, ffuf, gobuster, nuclei     │  │
 │  │ • sslscan, testssl, sslyze                          │  │
 │  │ • enum4linux, crackmapexec, smbclient               │  │
 │  │ • hydra, john, hashcat                              │  │
 │  │ • searchsploit, metasploit, theHarvester            │  │
+│  │ • trivy, syft (explicit daemonless sources)          │  │
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
                            │
@@ -367,6 +369,13 @@ Once configured, you can ask Claude things like:
 | `full_recon` | Comprehensive multi-tool assessment | `target` | `full_recon target="example.com"` |
 | `web_audit` | Complete web application audit | `target` | `web_audit target="http://testapp.local"` |
 | `network_sweep` | Full network discovery | `target` | `network_sweep target="192.168.1.0/24"` |
+
+### Container & Artifact Scanning (2 additions)
+
+| Tool | Description | Parameters | Example |
+|------|-------------|------------|---------|
+| `trivy_scan` | Scan a mounted filesystem, SBOM, image archive, or explicit public-registry image | `target_ref`, `source_type` | `trivy_scan target_ref="project" source_type="filesystem"` |
+| `syft_sbom` | Generate an SBOM from a mounted source, archive, OCI layout, or explicit public-registry image | `target_ref`, `source_type`, `format` | `syft_sbom target_ref="project" source_type="dir" format="cyclonedx-json"` |
 
 ---
 
