@@ -40,14 +40,40 @@ done
 python3 - <<'PY'
 import json
 import subprocess
-import kali_pentest_server
+from pathlib import Path
 
-tools = kali_pentest_server.mcp._tool_manager._tools
-if len(tools) != 42:
-    raise SystemExit(f"expected 42 MCP tools, found {len(tools)}")
-print("verified 42 MCP tools")
+contract_path = Path("/usr/local/share/kali-mcp/legacy_tool_contract.json")
+try:
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    if contract.get("schema_version") != 1:
+        raise ValueError("schema_version must be 1")
+    legacy_tools = contract["tools"]
+    additions = contract["additions"]
+    if not isinstance(legacy_tools, list) or not isinstance(additions, list):
+        raise TypeError("tools and additions must be lists")
+    expected_tools = legacy_tools + additions
+    legacy_names = [tool["name"] for tool in legacy_tools]
+    expected_names = [tool["name"] for tool in expected_tools]
+    for tool in expected_tools:
+        if not isinstance(tool["parameters"], list):
+            raise TypeError(f"parameters for {tool['name']!r} must be a list")
+        for parameter in tool["parameters"]:
+            if "name" not in parameter or "default" not in parameter:
+                raise ValueError(
+                    f"parameter entries for {tool['name']!r} require name and default"
+                )
+except (OSError, TypeError, KeyError, json.JSONDecodeError, ValueError) as error:
+    raise SystemExit(f"invalid legacy MCP contract at {contract_path}: {error}") from error
 
-request = {
+if len(legacy_names) != 42 or len(set(legacy_names)) != 42:
+    raise SystemExit(
+        "legacy MCP contract must contain exactly 42 uniquely named tools; "
+        f"found {len(legacy_names)} entries and {len(set(legacy_names))} unique names"
+    )
+if len(expected_names) != len(set(expected_names)):
+    raise SystemExit("legacy MCP contract tools and additions contain duplicate names")
+
+initialize = {
     "jsonrpc": "2.0",
     "id": 1,
     "method": "initialize",
@@ -57,16 +83,93 @@ request = {
         "clientInfo": {"name": "image-smoke", "version": "1"},
     },
 }
+initialized = {
+    "jsonrpc": "2.0",
+    "method": "notifications/initialized",
+}
+list_tools = {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list",
+    "params": {},
+}
 process = subprocess.run(
     ["python3", "kali_pentest_server.py"],
-    input=json.dumps(request) + "\n",
+    input="".join(
+        json.dumps(message) + "\n"
+        for message in (initialize, initialized, list_tools)
+    ),
     text=True,
     capture_output=True,
     timeout=10,
     check=False,
 )
-responses = [json.loads(line) for line in process.stdout.splitlines() if line.strip().startswith("{")]
-if not any(response.get("id") == 1 and "result" in response for response in responses):
-    raise SystemExit(f"MCP initialize smoke failed: {process.stderr[-500:]}")
-print("verified MCP stdio initialization")
+try:
+    responses = [
+        json.loads(line)
+        for line in process.stdout.splitlines()
+        if line.strip().startswith("{")
+    ]
+except json.JSONDecodeError as error:
+    raise SystemExit(f"MCP server emitted invalid JSON: {error}") from error
+
+initialize_response = next(
+    (response for response in responses if response.get("id") == 1), None
+)
+if not initialize_response or "result" not in initialize_response:
+    detail = initialize_response or process.stderr[-500:] or "no response"
+    raise SystemExit(f"MCP initialize smoke failed: {detail}")
+
+tools_response = next(
+    (response for response in responses if response.get("id") == 2), None
+)
+try:
+    discovered_tools = tools_response["result"]["tools"]
+    discovered_names = [tool["name"] for tool in discovered_tools]
+except (TypeError, KeyError) as error:
+    detail = tools_response or process.stderr[-500:] or "no response"
+    raise SystemExit(f"MCP tools/list smoke failed: {detail}") from error
+
+if discovered_names != expected_names:
+    raise SystemExit(
+        "MCP tools/list names do not match declared legacy tools and additions: "
+        f"expected {expected_names!r}, got {discovered_names!r}"
+    )
+
+for expected_tool, discovered_tool in zip(expected_tools, discovered_tools):
+    tool_name = expected_tool["name"]
+    input_schema = discovered_tool.get("inputSchema")
+    if not isinstance(input_schema, dict):
+        raise SystemExit(f"MCP tool {tool_name!r} has no public inputSchema")
+    properties = input_schema.get("properties")
+    if not isinstance(properties, dict):
+        raise SystemExit(f"MCP tool {tool_name!r} inputSchema has no properties object")
+
+    expected_parameters = expected_tool["parameters"]
+    expected_parameter_names = [parameter["name"] for parameter in expected_parameters]
+    discovered_parameter_names = list(properties)
+    if discovered_parameter_names != expected_parameter_names:
+        raise SystemExit(
+            f"MCP tool {tool_name!r} parameter order mismatch: "
+            f"expected {expected_parameter_names!r}, got {discovered_parameter_names!r}"
+        )
+    for parameter in expected_parameters:
+        parameter_name = parameter["name"]
+        public_parameter = properties[parameter_name]
+        if "default" not in public_parameter:
+            raise SystemExit(
+                f"MCP tool {tool_name!r} parameter {parameter_name!r} "
+                "does not expose its default"
+            )
+        if public_parameter["default"] != parameter["default"]:
+            raise SystemExit(
+                f"MCP tool {tool_name!r} parameter {parameter_name!r} default mismatch: "
+                f"expected {parameter['default']!r}, "
+                f"got {public_parameter['default']!r}"
+            )
+
+print(
+    f"verified MCP initialize and tools/list: "
+    f"{len(legacy_names)} legacy tools, {len(additions)} declared additions"
+)
 PY
