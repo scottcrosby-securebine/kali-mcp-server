@@ -65,28 +65,56 @@ class OletoolsAdapterTests(unittest.TestCase):
                 run.assert_not_called()
 
     def test_failed_malformed_and_secret_bearing_output_is_safe(self):
-        cases = (("", "password: OFFICE-SECRET", 2), ("[{", "", 0), ("[]", "", 0))
+        cases = (
+            ("", (FIXTURES / "oletools-failure.txt").read_text(encoding="utf-8"), 2),
+            ((FIXTURES / "oletools-malformed.json").read_text(encoding="utf-8"), "", 0),
+            ((FIXTURES / "oletools-truncated.json").read_text(encoding="utf-8"), "", 0),
+        )
         for stdout, stderr, returncode in cases:
             with self.subTest(stdout=stdout, returncode=returncode):
                 response, _, files = self.invoke(stdout=stdout, stderr=stderr, returncode=returncode)
                 self.assertIn("Error", response)
-                self.assertNotIn("OFFICE-SECRET", response)
+                self.assertNotIn("OfficeFailureSecret-7", response)
                 self.assertFalse(files)
 
+        response, _, files = self.invoke(
+            stdout=(FIXTURES / "oletools-secret-bearing.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("result-id=", response)
+        self.assertNotIn("T2ZmaWNlU2VjcmV0LTc=", files[0])
+        self.assertIn("AutoOpen", files[0])
+
     def test_web_audit_deduplicates_inventory_with_uro_and_records_counts(self):
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="https://example.test/a\n", stderr="")
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="https://example.test/start\nhttps://example.test/next\n", stderr=""
+        )
         child = AsyncMock(return_value="ok")
+        headers = AsyncMock(
+            return_value="✅ Scan completed successfully:\nLocation: /next\nLocation: https://example.test/next\nLocation: https://outside.test/ignored"
+        )
+        nikto = AsyncMock(return_value="ok")
         with (
             patch.object(self.server, "execute_command", return_value=completed) as execute,
             patch.object(self.server, "whatweb_scan", child),
             patch.object(self.server, "wafw00f_scan", child),
-            patch.object(self.server, "web_headers", child),
-            patch.object(self.server, "nikto_scan", child),
+            patch.object(self.server, "web_headers", headers),
+            patch.object(self.server, "nikto_scan", nikto),
             patch.object(self.server, "sslscan_scan", child),
         ):
-            response = asyncio.run(self.server.web_audit("https://example.test/a"))
+            response = asyncio.run(self.server.web_audit("https://example.test/start"))
         self.assertEqual(["uro"], execute.call_args.args[0])
-        self.assertIn("URL inventory: original=1, deduplicated=1", response)
+        self.assertEqual(
+            "https://example.test/start\nhttps://example.test/next\nhttps://example.test/next\n",
+            execute.call_args.kwargs["input_text"],
+        )
+        self.assertIn("Original URL inventory (3)", response)
+        self.assertIn("Deduplicated crawl inventory (2)", response)
+        self.assertIn("https://example.test/next", response)
+        self.assertNotIn("outside.test", execute.call_args.kwargs["input_text"])
+        self.assertEqual(
+            [("https://example.test/start",), ("https://example.test/next",)],
+            [call.args for call in nikto.await_args_list],
+        )
         self.assertNotIn("uro_scan", [tool.__name__ for tool in self.server.mcp.tools])
 
 
