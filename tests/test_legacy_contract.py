@@ -122,6 +122,12 @@ class LegacyToolContractTests(unittest.TestCase):
                         boundaries.add(called)
                     elif called not in public_names:
                         pending.append(called)
+            if tool_name in self.contract["composites"]:
+                self.assertNotIn(
+                    "run_command",
+                    visited,
+                    f"{tool_name} must delegate through public tool wrappers",
+                )
             if boundaries:
                 actual[tool_name] = boundaries
         expected = {
