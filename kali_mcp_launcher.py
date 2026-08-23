@@ -7,6 +7,7 @@ import argparse
 import os
 import platform
 import shlex
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,8 +75,25 @@ def _mount_value(name: str, host_path: str) -> str:
         raise LauncherError(f"invalid_mount: {name} directory does not exist: {host_path}") from error
     if not resolved.is_dir():
         raise LauncherError(f"invalid_mount: {name} must be a directory: {host_path}")
+    _reject_host_sockets(name, resolved)
     suffix = ",readonly" if read_only else ""
     return f"type=bind,src={resolved},dst={target}{suffix}"
+
+
+def _reject_host_sockets(name: str, root: Path) -> None:
+    """Fail closed if a bind source would expose a host Unix socket."""
+    def walk_error(error: OSError) -> None:
+        raise LauncherError(f"invalid_mount: cannot inspect {name} directory: {error.filename}") from error
+
+    for directory, subdirectories, filenames in os.walk(root, followlinks=False, onerror=walk_error):
+        for entry in (*subdirectories, *filenames):
+            candidate = Path(directory, entry)
+            try:
+                mode = candidate.stat().st_mode
+            except OSError as error:
+                raise LauncherError(f"invalid_mount: cannot inspect {name} path: {candidate}") from error
+            if stat.S_ISSOCK(mode):
+                raise LauncherError(f"prohibited_socket: {name} directory contains a host socket: {candidate}")
 
 
 def build_docker_command(profile: str, image: str, mounts: Mapping[str, str]) -> list[str]:

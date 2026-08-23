@@ -1,4 +1,5 @@
 import os
+import socket
 import tempfile
 import unittest
 from pathlib import Path
@@ -72,6 +73,36 @@ class DockerArgumentTests(unittest.TestCase):
             launcher.build_docker_command("linux-full", "kali-mcp-server:test", {"workspace": "/does/not/exist"})
         with self.assertRaisesRegex(launcher.LauncherError, "invalid_image"):
             launcher.build_docker_command("linux-full", "--privileged", {})
+
+    def test_host_socket_cannot_be_exposed_through_any_mount(self):
+        with tempfile.TemporaryDirectory() as root:
+            socket_path = os.path.join(root, "renamed-control.sock")
+            host_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                host_socket.bind(socket_path)
+                for mount_name in launcher.MOUNT_TARGETS:
+                    with self.subTest(mount_name=mount_name), self.assertRaisesRegex(
+                        launcher.LauncherError, "prohibited_socket"
+                    ):
+                        launcher.build_docker_command(
+                            "linux-full", "kali-mcp-server:test", {mount_name: root}
+                        )
+            finally:
+                host_socket.close()
+
+    def test_symlink_to_host_socket_is_rejected(self):
+        with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as mount_root:
+            socket_path = os.path.join(source, "docker.sock")
+            host_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                host_socket.bind(socket_path)
+                os.symlink(socket_path, os.path.join(mount_root, "socket-alias"))
+                with self.assertRaisesRegex(launcher.LauncherError, "prohibited_socket"):
+                    launcher.build_docker_command(
+                        "linux-full", "kali-mcp-server:test", {"workspace": mount_root}
+                    )
+            finally:
+                host_socket.close()
 
     def test_ephemeral_output_mounts_are_used_when_not_persisted(self):
         args = launcher.build_docker_command("linux-full", "kali-mcp-server:test", {})
