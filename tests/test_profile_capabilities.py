@@ -25,6 +25,17 @@ import kali_pentest_server as server
 
 
 class ProfileCapabilityTests(unittest.TestCase):
+    def test_fixed_category_nmap_wrappers_exclude_broadcast_scripts(self):
+        cases = (
+            (server.nmap_vuln_scan, "--script=(vuln) and not broadcast"),
+            (server.nmap_comprehensive_scan, "--script=(default) and not broadcast"),
+        )
+        for wrapper, expected_selector in cases:
+            with self.subTest(wrapper=wrapper.__name__), patch.object(server, "run_command", return_value="ok") as run_command:
+                result = asyncio.run(wrapper("192.0.2.1"))
+                self.assertEqual("ok", result)
+                self.assertIn(expected_selector, run_command.call_args.args[0])
+
     def test_broadcast_nse_category_fails_before_command_execution(self):
         for profile in ("linux-full", "linux-hardened", "mac-hardened"):
             with (
