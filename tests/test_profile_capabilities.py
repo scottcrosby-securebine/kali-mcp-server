@@ -57,7 +57,15 @@ class ProfileCapabilityTests(unittest.TestCase):
         with patch.object(server, "run_command", return_value="ok") as run_command:
             result = asyncio.run(server.nmap_script_scan("192.0.2.1", "safe,discovery"))
             self.assertEqual("ok", result)
-            self.assertIn("--script=safe,discovery", run_command.call_args.args[0])
+            self.assertIn("--script=(safe or discovery) and not broadcast", run_command.call_args.args[0])
+
+    def test_every_allowed_category_excludes_overlapping_broadcast_scripts(self):
+        allowed = ("default", "safe", "discovery", "auth", "vuln", "exploit", "intrusive", "malware")
+        for category in allowed:
+            with self.subTest(category=category), patch.object(server, "run_command", return_value="ok") as run_command:
+                asyncio.run(server.nmap_script_scan("192.0.2.1", category))
+                command = run_command.call_args.args[0]
+                self.assertIn(f"--script=({category}) and not broadcast", command)
 
 
 if __name__ == "__main__":
