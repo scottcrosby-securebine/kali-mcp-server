@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-lock_file="${1:-/tmp/packages.lock}"
+lock_files="${*:-/tmp/packages.lock /tmp/source-packages.lock}"
 
 if [ "$(id -u)" -eq 0 ]; then
     echo "image must run as a non-root user" >&2
@@ -18,15 +18,19 @@ if getcap /usr/bin/nmap /usr/lib/nmap/nmap | grep -q '='; then
     exit 1
 fi
 
-while IFS='=' read -r package expected; do
-    actual="$(dpkg-query -W -f='${Version}' "${package}")"
-    if [ "${actual}" != "${expected}" ]; then
-        echo "${package}: expected ${expected}, got ${actual}" >&2
-        exit 1
-    fi
-done < "${lock_file}"
+for lock_file in ${lock_files}; do
+    while IFS='=' read -r package expected; do
+        actual="$(dpkg-query -W -f='${Version}' "${package}")"
+        if [ "${actual}" != "${expected}" ]; then
+            echo "${package}: expected ${expected}, got ${actual}" >&2
+            exit 1
+        fi
+    done < "${lock_file}"
+done
 
-for binary in python3 nmap dig dnsrecon dnsenum fierce whois nc nikto wpscan sqlmap dirb ffuf gobuster wfuzz whatweb wafw00f sslscan sslyze testssl enum4linux nbtscan smbclient crackmapexec responder hydra john hashcat searchsploit msfconsole nuclei theHarvester subfinder amass; do
+required_binaries="python3 nmap dig dnsrecon dnsenum fierce whois nc nikto wpscan sqlmap dirb ffuf gobuster wfuzz whatweb wafw00f sslscan sslyze testssl enum4linux nbtscan smbclient crackmapexec responder hydra john hashcat searchsploit msfconsole nuclei theHarvester subfinder amass"
+
+for binary in ${required_binaries}; do
     command -v "${binary}" >/dev/null 2>&1 || {
         echo "missing required binary: ${binary}" >&2
         exit 1

@@ -2,8 +2,12 @@
 
 The release build uses the multi-architecture Kali rolling manifest
 `sha256:ef7a551400b01dc501ff97f192c5b2b1ec629576dab5032822190cd2684ca4e1`.
-The top-level packages and expected versions are recorded in the image build
-lock. Builds fail when those exact versions are unavailable or do not match.
+The repository packages and source-built packages have separate version locks.
+Builds fail when those exact versions are unavailable or do not match.
+Kali does not publish `dirb`, `sslscan`, or `nbtscan` binaries for arm64. The
+image therefore builds the exact Kali source-package versions for both
+architectures after verifying their source checksums, preserving the same MCP
+operations without substituting different tools.
 The lock covers direct image requirements; the workflow's complete installed
 package inventory records the resolved transitive closure. `requirements.txt`
 is a developer compatibility manifest, while the image installs the locked
