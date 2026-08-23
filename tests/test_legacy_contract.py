@@ -98,16 +98,17 @@ class LegacyToolContractTests(unittest.TestCase):
             )
 
         actual = {}
-        for composite in self.contract["composites"]:
+        for tool_name in public_names:
             calls = [
                 (node.lineno, node.func.id)
-                for node in ast.walk(definitions[composite])
+                for node in ast.walk(definitions[tool_name])
                 if isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
                 and node.func.id in public_names
-                and node.func.id != composite
+                and node.func.id != tool_name
             ]
-            actual[composite] = [name for _line, name in sorted(calls)]
+            if calls:
+                actual[tool_name] = [name for _line, name in sorted(calls)]
         self.assertEqual(self.contract["composites"], actual)
 
     def _run_composite(self, composite, target, expected_calls):
