@@ -72,347 +72,76 @@ class LegacyToolContractTests(unittest.TestCase):
             for node in module.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         }
-        legacy_names = {tool["name"] for tool in self.contract["tools"]}
-        actual = {}
-        for composite in self.contract["composites"]:
-            calls = []
-            for node in ast.walk(definitions[composite]):
-                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                    if node.func.id in legacy_names and node.func.id != composite:
-                        calls.append((node.lineno, node.func.id))
-            actual[composite] = [name for _line, name in sorted(calls)]
-        self.assertEqual(self.contract["composites"], actual)
-        chained = {name for calls in actual.values() for name in calls}
-        self.assertTrue(chained.isdisjoint(self.contract["never_auto_chain"]))
-
-        explicit_only = set(self.contract["never_auto_chain"])
-        public_names = legacy_names | {
-            tool["name"] for tool in self.contract["additions"]
+        public_names = {
+            tool["name"]
+            for tool in self.contract["tools"] + self.contract["additions"]
         }
-        module_functions = set(definitions)
-        module_aliases = {}
-        module_assignments = [
-            statement
-            for statement in module.body
-            if isinstance(statement, (ast.Assign, ast.AnnAssign))
-            and statement.value is not None
-        ]
-        class_assignments = [
-            statement
-            for class_definition in module.body
-            if isinstance(class_definition, ast.ClassDef)
-            for statement in class_definition.body
-            if isinstance(statement, (ast.Assign, ast.AnnAssign))
-            and statement.value is not None
-        ]
-        for statement in module_assignments:
-            if not isinstance(statement.value, ast.Name):
-                continue
-            resolved = module_aliases.get(statement.value.id, statement.value.id)
-            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    if resolved in module_functions:
-                        module_aliases[target.id] = resolved
-                    else:
-                        module_aliases.pop(target.id, None)
-        module_callable_targets = {}
-        for statement in module_assignments:
-            referenced_targets = set()
-            for reference in (
-                node.id for node in ast.walk(statement.value) if isinstance(node, ast.Name)
+        explicit_only = set(self.contract["never_auto_chain"])
+
+        parents = {
+            child: parent
+            for parent in ast.walk(module)
+            for child in ast.iter_child_nodes(parent)
+        }
+        for node in ast.walk(module):
+            if not (
+                isinstance(node, ast.Name)
+                and isinstance(node.ctx, ast.Load)
+                and node.id in definitions
             ):
-                referenced_targets.update(module_callable_targets.get(reference, set()))
-                resolved = module_aliases.get(reference, reference)
-                if resolved in module_functions:
-                    referenced_targets.add(resolved)
-            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    module_callable_targets.setdefault(target.id, set()).update(
-                        referenced_targets
-                    )
-        object_aliases = {}
-        for statement in module_assignments:
-            if not isinstance(statement.value, ast.Name):
                 continue
-            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    object_aliases.setdefault(target.id, set()).add(statement.value.id)
-                    object_aliases.setdefault(statement.value.id, set()).add(target.id)
-
-        def aliased_names(name):
-            found = set()
-            pending = [name]
-            while pending:
-                candidate = pending.pop()
-                if candidate in found:
-                    continue
-                found.add(candidate)
-                pending.extend(object_aliases.get(candidate, set()) - found)
-            return found
-
-        def callable_references(nodes):
-            referenced_targets = set()
-            for reference in (
-                node.id
-                for value in nodes
-                for node in ast.walk(value)
-                if isinstance(node, ast.Name)
-            ):
-                referenced_targets.update(module_callable_targets.get(reference, set()))
-                resolved = module_aliases.get(reference, reference)
-                if resolved in module_functions:
-                    referenced_targets.add(resolved)
-            return referenced_targets
-
-        mutating_methods = {"add", "append", "extend", "insert", "update", "setdefault"}
-        for expression in (
-            node.value
-            for node in ast.walk(module)
-            if isinstance(node, ast.Expr)
-            and isinstance(node.value, ast.Call)
-            and isinstance(node.value.func, ast.Attribute)
-            and node.value.func.attr in mutating_methods
-            and isinstance(node.value.func.value, ast.Name)
-        ):
-            referenced_targets = callable_references(
-                [*expression.args, *(keyword.value for keyword in expression.keywords)]
+            parent = parents[node]
+            self.assertTrue(
+                isinstance(parent, ast.Call) and parent.func is node,
+                f"server function {node.id} must be called directly, not stored or dispatched",
             )
-            for container_name in aliased_names(expression.func.value.id):
-                module_callable_targets.setdefault(container_name, set()).update(
-                    referenced_targets
-                )
-        for statement in (
-            node
-            for node in ast.walk(module)
-            if isinstance(node, (ast.Assign, ast.AnnAssign))
-            and node.value is not None
-        ):
-            referenced_targets = callable_references([statement.value])
-            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-            for target in targets:
-                if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
-                    for container_name in aliased_names(target.value.id):
-                        module_callable_targets.setdefault(container_name, set()).update(
-                            referenced_targets
-                        )
-        class_callable_aliases = set()
-        for class_definition in (
-            node for node in module.body if isinstance(node, ast.ClassDef)
-        ):
-            local_callable_aliases = set()
-            for statement in ast.walk(class_definition):
-                if not isinstance(statement, (ast.Assign, ast.AnnAssign)) or statement.value is None:
-                    continue
-                referenced_targets = set()
-                for reference in (
-                    node.id for node in ast.walk(statement.value) if isinstance(node, ast.Name)
-                ):
-                    referenced_targets.update(module_callable_targets.get(reference, set()))
-                    resolved = module_aliases.get(reference, reference)
-                    if resolved in module_functions or reference in local_callable_aliases:
-                        referenced_targets.add(resolved)
-                if not referenced_targets:
-                    continue
-                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-                local_callable_aliases.update(
-                    target.id for target in targets if isinstance(target, ast.Name)
-                )
-            class_callable_aliases.update(local_callable_aliases)
-            for statement in ast.walk(class_definition):
-                if not (
-                    isinstance(statement, ast.Expr)
-                    and isinstance(statement.value, ast.Call)
-                    and isinstance(statement.value.func, ast.Attribute)
-                    and statement.value.func.attr in mutating_methods
-                    and isinstance(statement.value.func.value, ast.Name)
-                ):
-                    continue
-                if any(
-                    module_aliases.get(node.id, node.id) in module_functions
-                    or node.id in local_callable_aliases
-                    for argument in [*statement.value.args, *(keyword.value for keyword in statement.value.keywords)]
-                    for node in ast.walk(argument)
-                    if isinstance(node, ast.Name)
-                ):
-                    class_callable_aliases.add(statement.value.func.value.id)
-            for statement in ast.walk(class_definition):
-                if not (
-                    isinstance(statement, (ast.Assign, ast.AnnAssign))
-                    and statement.value is not None
-                ):
-                    continue
-                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-                if any(
-                    isinstance(target, ast.Subscript)
-                    and isinstance(target.value, ast.Name)
-                    for target in targets
-                ) and callable_references([statement.value]):
-                    class_callable_aliases.update(
-                        target.value.id
-                        for target in targets
-                        if isinstance(target, ast.Subscript)
-                        and isinstance(target.value, ast.Name)
-                    )
-        assignment_statements = module_assignments + class_assignments
-        module_explicit_containers = set()
-        changed = True
-        while changed:
-            changed = False
-            tainted = (
-                explicit_only
-                | module_explicit_containers
-                | {alias for alias, resolved in module_aliases.items() if resolved in explicit_only}
-            )
-            for statement in assignment_statements:
-                if any(
-                    isinstance(node, ast.Name) and node.id in tainted
-                    for node in ast.walk(statement.value)
-                ):
-                    targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-                    for target in targets:
-                        if isinstance(target, ast.Name) and target.id not in module_explicit_containers:
-                            module_explicit_containers.add(target.id)
-                            changed = True
-        call_graph = {}
-        explicit_references = {}
-        forbidden_dynamic_dispatch = {"eval", "exec", "getattr", "globals", "locals", "__import__"}
-        for function_name, definition in definitions.items():
-            called_names = set()
-            referenced_explicit = set()
-            local_aliases = {}
-            local_assignments = sorted(
-                (
-                    node
-                    for node in ast.walk(definition)
-                    if isinstance(node, (ast.Assign, ast.AnnAssign))
-                    and node.value is not None
-                ),
-                key=lambda node: node.lineno,
-            )
-            for statement in local_assignments:
-                resolved_targets = set()
-                for source in (
-                    node.id for node in ast.walk(statement.value) if isinstance(node, ast.Name)
-                ):
-                    resolved_targets.update(local_aliases.get(source, set()))
-                    resolved_targets.update(module_callable_targets.get(source, set()))
-                    resolved = module_aliases.get(source, source)
-                    if resolved in module_functions:
-                        resolved_targets.add(resolved)
-                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-                for target in targets:
-                    if not isinstance(target, ast.Name):
-                        continue
-                    local_aliases.setdefault(target.id, set()).update(resolved_targets)
-            for node in ast.walk(definition):
-                if isinstance(node, ast.Call):
-                    if isinstance(node.func, ast.Name):
-                        resolved_calls = local_aliases.get(node.func.id)
-                        if resolved_calls is None:
-                            resolved_calls = module_callable_targets.get(node.func.id)
-                        if resolved_calls is None:
-                            resolved_calls = {module_aliases.get(node.func.id, node.func.id)}
-                        called_names.update(resolved_calls)
-                        referenced_explicit.update(
-                            resolved_call
-                            for resolved_call in resolved_calls
-                            if resolved_call in explicit_only
-                            and resolved_call != function_name
-                        )
-                    elif isinstance(node.func, ast.Attribute):
-                        called_names.add(node.func.attr)
-                    else:
-                        resolved_calls = set()
-                        for reference in (
-                            child.id
-                            for child in ast.walk(node.func)
-                            if isinstance(child, ast.Name)
-                        ):
-                            resolved_calls.update(local_aliases.get(reference, set()))
-                            resolved_calls.update(module_callable_targets.get(reference, set()))
-                            resolved = module_aliases.get(reference, reference)
-                            if resolved in module_functions:
-                                resolved_calls.add(resolved)
-                        called_names.update(resolved_calls)
-                        referenced_explicit.update(
-                            resolved_call
-                            for resolved_call in resolved_calls
-                            if resolved_call in explicit_only
-                            and resolved_call != function_name
-                        )
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-                    if node.id in explicit_only and node.id != function_name:
-                        referenced_explicit.add(node.id)
-                    elif node.id in module_explicit_containers:
-                        referenced_explicit.add(node.id)
-                elif isinstance(node, ast.Attribute) and node.attr in explicit_only:
-                    if node.attr != function_name:
-                        referenced_explicit.add(node.attr)
-                elif isinstance(node, ast.Attribute) and node.attr in module_explicit_containers:
-                    referenced_explicit.add(node.attr)
-                elif isinstance(node, ast.Attribute) and node.attr in class_callable_aliases:
-                    referenced_explicit.add(f"class-callable-alias:{node.attr}")
-                elif isinstance(node, ast.Constant) and node.value in explicit_only:
-                    referenced_explicit.add(node.value)
-                if (
-                    isinstance(node, ast.Call)
-                    and (
-                        isinstance(node.func, ast.Name)
-                        and node.func.id in forbidden_dynamic_dispatch
-                        or isinstance(node.func, ast.Attribute)
-                        and node.func.attr == "import_module"
-                    )
-                ):
-                    dispatch_name = node.func.id if isinstance(node.func, ast.Name) else node.func.attr
-                    referenced_explicit.add(f"dynamic-dispatch:{dispatch_name}")
-            call_graph[function_name] = called_names & module_functions
-            explicit_references[function_name] = referenced_explicit
 
         for tool_name in public_names - explicit_only:
-            reachable = set()
-            pending = [tool_name]
-            while pending:
-                function_name = pending.pop()
-                if function_name in reachable:
-                    continue
-                reachable.add(function_name)
-                pending.extend(call_graph.get(function_name, set()) - reachable)
-            chained_explicit_tools = set().union(
-                *(explicit_references.get(function_name, set()) for function_name in reachable)
-            )
-            self.assertEqual(
-                set(),
-                chained_explicit_tools,
-                f"{tool_name} must not auto-chain explicit-only tools",
-            )
+            awaited = [
+                node.value
+                for node in ast.walk(definitions[tool_name])
+                if isinstance(node, ast.Await)
+            ]
+            for call in awaited:
+                self.assertIsInstance(call, ast.Call, f"{tool_name} must await a direct tool call")
+                self.assertIsInstance(
+                    call.func,
+                    ast.Name,
+                    f"{tool_name} must not dispatch awaited calls indirectly",
+                )
+                self.assertNotIn(
+                    call.func.id,
+                    explicit_only,
+                    f"{tool_name} must not auto-chain explicit-only tools",
+                )
 
-        for composite in self.contract["composites"]:
-            reachable = set()
-            public_boundaries = set()
-            pending = [composite]
-            while pending:
-                function_name = pending.pop()
-                if function_name in reachable:
+        actual = {}
+        for composite, expected_calls in self.contract["composites"].items():
+            awaited_names = []
+            for node in ast.walk(definitions[composite]):
+                if not isinstance(node, ast.Await):
                     continue
-                reachable.add(function_name)
-                for called in call_graph.get(function_name, set()) - reachable:
-                    if called in public_names and called != composite:
-                        public_boundaries.add(called)
-                    else:
-                        pending.append(called)
-            self.assertEqual(
-                set(self.contract["composites"][composite]),
-                public_boundaries,
-                f"{composite} must reach only its declared public tools",
-            )
+                call = node.value
+                self.assertIsInstance(call, ast.Call)
+                self.assertIsInstance(
+                    call.func,
+                    ast.Name,
+                    f"{composite} must call declared tools directly",
+                )
+                awaited_names.append((node.lineno, call.func.id))
+            actual[composite] = [name for _line, name in sorted(awaited_names)]
+            self.assertEqual(expected_calls, actual[composite])
             self.assertNotIn(
                 "run_command",
-                reachable,
+                {
+                    node.func.id
+                    for node in ast.walk(definitions[composite])
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                },
                 f"{composite} must delegate through public tool wrappers",
             )
+
+        self.assertEqual(self.contract["composites"], actual)
 
     def _run_composite(self, composite, target, expected_calls):
         call_log = []
