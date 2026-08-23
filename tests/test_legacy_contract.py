@@ -96,6 +96,21 @@ class LegacyToolContractTests(unittest.TestCase):
                 f"server function {node.id} must be called directly, not stored or dispatched",
             )
 
+        for function_name, definition in definitions.items():
+            chained_explicit_tools = {
+                node.id
+                for node in ast.walk(definition)
+                if isinstance(node, ast.Name)
+                and isinstance(node.ctx, ast.Load)
+                and node.id in explicit_only
+                and node.id != function_name
+            }
+            self.assertEqual(
+                set(),
+                chained_explicit_tools,
+                f"{function_name} must not auto-chain explicit-only tools",
+            )
+
         for tool_name in public_names - explicit_only:
             awaited = [
                 node.value
