@@ -1,6 +1,9 @@
 {
   "schema_version": 1,
-  "additions": [],
+  "additions": [
+    {"name":"trivy_scan","parameters":[{"name":"target_ref","default":""},{"name":"source_type","default":"filesystem"}],"return":"str"},
+    {"name":"syft_sbom","parameters":[{"name":"target_ref","default":""},{"name":"source_type","default":"dir"},{"name":"format","default":"cyclonedx-json"}],"return":"str"}
+  ],
   "tools": [
     {"name":"nmap_scan","parameters":[{"name":"target","default":""},{"name":"ports","default":""}],"return":"str"},
     {"name":"nmap_service_scan","parameters":[{"name":"target","default":""},{"name":"ports","default":""}],"return":"str"},

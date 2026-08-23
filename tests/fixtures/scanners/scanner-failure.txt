@@ -1,0 +1,1 @@
+scanner failed: fixture registry is unavailable

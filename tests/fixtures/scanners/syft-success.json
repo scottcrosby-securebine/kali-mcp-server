@@ -1,0 +1,12 @@
+{
+  "artifacts": [{
+    "id": "pkg-1",
+    "name": "demo-package",
+    "version": "1.0",
+    "type": "python",
+    "locations": [{"path": "/workspace/demo/requirements.txt"}]
+  }],
+  "source": {"type": "directory", "target": "/workspace/demo"},
+  "descriptor": {"name": "syft", "version": "1.0.0"},
+  "schema": {"version": "16.0.0", "url": "https://example.invalid/schema"}
+}

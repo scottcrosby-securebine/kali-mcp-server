@@ -1,0 +1,18 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "/workspace/demo",
+  "ArtifactType": "filesystem",
+  "Metadata": {"OS": {"Family": "debian", "Name": "12"}},
+  "Results": [{
+    "Target": "requirements.txt",
+    "Class": "lang-pkgs",
+    "Type": "pip",
+    "Vulnerabilities": [{
+      "VulnerabilityID": "CVE-2099-0001",
+      "PkgName": "demo-package",
+      "InstalledVersion": "1.0",
+      "Severity": "HIGH",
+      "Title": "Fixture vulnerability"
+    }]
+  }]
+}

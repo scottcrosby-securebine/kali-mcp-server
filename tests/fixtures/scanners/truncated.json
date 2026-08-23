@@ -1,0 +1,6 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "/workspace/demo",
+  "Results": [
+    {"Target": "one", "Vulnerabilities": []},
+    {"Target": "two", "Vulnerabilities": [
