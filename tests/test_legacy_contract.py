@@ -163,10 +163,39 @@ class LegacyToolContractTests(unittest.TestCase):
         for function_name, definition in definitions.items():
             called_names = set()
             referenced_explicit = set()
+            local_aliases = {}
+            local_assignments = sorted(
+                (
+                    node
+                    for node in ast.walk(definition)
+                    if isinstance(node, (ast.Assign, ast.AnnAssign))
+                    and isinstance(node.value, ast.Name)
+                ),
+                key=lambda node: node.lineno,
+            )
+            for statement in local_assignments:
+                source = statement.value.id
+                resolved = local_aliases.get(
+                    source, module_aliases.get(source, source)
+                )
+                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                for target in targets:
+                    if not isinstance(target, ast.Name):
+                        continue
+                    if resolved in module_functions:
+                        local_aliases[target.id] = resolved
+                    else:
+                        local_aliases.pop(target.id, None)
             for node in ast.walk(definition):
                 if isinstance(node, ast.Call):
                     if isinstance(node.func, ast.Name):
-                        called_names.add(module_aliases.get(node.func.id, node.func.id))
+                        resolved_call = local_aliases.get(
+                            node.func.id,
+                            module_aliases.get(node.func.id, node.func.id),
+                        )
+                        called_names.add(resolved_call)
+                        if resolved_call in explicit_only and resolved_call != function_name:
+                            referenced_explicit.add(resolved_call)
                     elif isinstance(node.func, ast.Attribute):
                         called_names.add(node.func.attr)
                 if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
