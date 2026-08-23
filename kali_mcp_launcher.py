@@ -64,8 +64,7 @@ def select_profile(host: Host, requested: str | None) -> str:
     return profile
 
 
-def _mount_value(name: str, host_path: str) -> str:
-    target, read_only = MOUNT_TARGETS[name]
+def _resolve_mount(name: str, host_path: str) -> Path:
     path = Path(host_path).expanduser()
     try:
         resolved = path.resolve(strict=True)
@@ -76,6 +75,11 @@ def _mount_value(name: str, host_path: str) -> str:
     if "," in str(resolved):
         raise LauncherError(f"invalid_mount: {name} path cannot contain a comma")
     _reject_host_sockets(name, resolved)
+    return resolved
+
+
+def _mount_value(name: str, resolved: Path) -> str:
+    target, read_only = MOUNT_TARGETS[name]
     suffix = ",readonly" if read_only else ""
     return f"type=bind,src={resolved},dst={target}{suffix}"
 
@@ -96,6 +100,17 @@ def _reject_host_sockets(name: str, root: Path) -> None:
                 raise LauncherError(f"prohibited_socket: {name} directory contains a host socket: {candidate}")
 
 
+def _reject_overlapping_mounts(mounts: Mapping[str, Path]) -> None:
+    """Prevent one host tree from gaining different access through an alias."""
+    items = list(mounts.items())
+    for index, (name, path) in enumerate(items):
+        for other_name, other_path in items[index + 1:]:
+            if path == other_path or path in other_path.parents or other_path in path.parents:
+                raise LauncherError(
+                    f"invalid_mount: {name} and {other_name} directories must not overlap"
+                )
+
+
 def build_docker_command(profile: str, image: str, mounts: Mapping[str, str]) -> list[str]:
     """Build Docker argv without invoking a shell."""
     if profile not in PROFILES:
@@ -107,6 +122,9 @@ def build_docker_command(profile: str, image: str, mounts: Mapping[str, str]) ->
         raise LauncherError(f"invalid_mount: unknown mount '{sorted(unknown_mounts)[0]}'")
 
     network = "host" if profile == "linux-full" else "bridge"
+    resolved_mounts = {name: _resolve_mount(name, host_path) for name, host_path in mounts.items()}
+    _reject_overlapping_mounts(resolved_mounts)
+
     command = [
         "docker",
         "run",
@@ -128,8 +146,8 @@ def build_docker_command(profile: str, image: str, mounts: Mapping[str, str]) ->
     ]
 
     for name in MOUNT_TARGETS:
-        if name in mounts:
-            command.extend(["--mount", _mount_value(name, mounts[name])])
+        if name in resolved_mounts:
+            command.extend(["--mount", _mount_value(name, resolved_mounts[name])])
         elif name in {"results", "reports"}:
             command.extend(["--tmpfs", f"/{name}:rw,nosuid,nodev,noexec"])
 

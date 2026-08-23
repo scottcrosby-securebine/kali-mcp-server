@@ -52,21 +52,18 @@ class DockerArgumentTests(unittest.TestCase):
 
     def test_input_mounts_are_read_only_and_outputs_are_writable(self):
         with tempfile.TemporaryDirectory(prefix="kali mcp ") as root:
-            paths = {
-                "workspace": root,
-                "artifacts": root,
-                "results": root,
-                "reports": root,
-                "secrets": root,
-            }
+            paths = {}
+            for name in launcher.MOUNT_TARGETS:
+                path = os.path.join(root, name)
+                os.mkdir(path)
+                paths[name] = path
             args = launcher.build_docker_command("linux-full", "kali-mcp-server:test", paths)
             mounts = [args[index + 1] for index, value in enumerate(args) if value == "--mount"]
-            resolved = str(Path(root).resolve())
-            self.assertIn(f"type=bind,src={resolved},dst=/workspace,readonly", mounts)
-            self.assertIn(f"type=bind,src={resolved},dst=/artifacts,readonly", mounts)
-            self.assertIn(f"type=bind,src={resolved},dst=/results", mounts)
-            self.assertIn(f"type=bind,src={resolved},dst=/reports", mounts)
-            self.assertIn(f"type=bind,src={resolved},dst=/run/secrets,readonly", mounts)
+            self.assertIn(f"type=bind,src={Path(paths['workspace']).resolve()},dst=/workspace,readonly", mounts)
+            self.assertIn(f"type=bind,src={Path(paths['artifacts']).resolve()},dst=/artifacts,readonly", mounts)
+            self.assertIn(f"type=bind,src={Path(paths['results']).resolve()},dst=/results", mounts)
+            self.assertIn(f"type=bind,src={Path(paths['reports']).resolve()},dst=/reports", mounts)
+            self.assertIn(f"type=bind,src={Path(paths['secrets']).resolve()},dst=/run/secrets,readonly", mounts)
 
     def test_missing_mount_and_unsafe_image_fail_readably(self):
         with self.assertRaisesRegex(launcher.LauncherError, "invalid_mount"):
@@ -120,6 +117,21 @@ class DockerArgumentTests(unittest.TestCase):
         tmpfs = [args[index + 1] for index, value in enumerate(args) if value == "--tmpfs"]
         self.assertTrue(any(value.startswith("/results:") for value in tmpfs))
         self.assertTrue(any(value.startswith("/reports:") for value in tmpfs))
+
+    def test_mount_roles_cannot_alias_or_nest_the_same_host_tree(self):
+        with tempfile.TemporaryDirectory() as root:
+            nested = os.path.join(root, "nested")
+            os.mkdir(nested)
+            cases = (
+                {"workspace": root, "reports": root},
+                {"workspace": root, "results": nested},
+                {"artifacts": nested, "reports": root},
+            )
+            for mounts in cases:
+                with self.subTest(mounts=mounts), self.assertRaisesRegex(
+                    launcher.LauncherError, "must not overlap"
+                ):
+                    launcher.build_docker_command("linux-full", "kali-mcp-server:test", mounts)
 
 
 class CliTests(unittest.TestCase):

@@ -97,7 +97,10 @@ class ProfileCapabilityTests(unittest.TestCase):
         for wrapper, arguments in cases:
             with self.subTest(wrapper=wrapper.__name__), patch.object(server, "run_command", return_value="ok") as run_command:
                 asyncio.run(wrapper(*arguments))
-                self.assertIn("--unprivileged", run_command.call_args.args[0])
+                command = run_command.call_args.args[0]
+                self.assertIn("--unprivileged", command)
+                self.assertEqual("--", command[-2])
+                self.assertEqual("192.0.2.1", command[-1])
 
 
 if __name__ == "__main__":
