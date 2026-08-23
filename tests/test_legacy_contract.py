@@ -223,6 +223,25 @@ class LegacyToolContractTests(unittest.TestCase):
                         )
                     elif isinstance(node.func, ast.Attribute):
                         called_names.add(node.func.attr)
+                    else:
+                        resolved_calls = set()
+                        for reference in (
+                            child.id
+                            for child in ast.walk(node.func)
+                            if isinstance(child, ast.Name)
+                        ):
+                            resolved_calls.update(local_aliases.get(reference, set()))
+                            resolved_calls.update(module_callable_targets.get(reference, set()))
+                            resolved = module_aliases.get(reference, reference)
+                            if resolved in module_functions:
+                                resolved_calls.add(resolved)
+                        called_names.update(resolved_calls)
+                        referenced_explicit.update(
+                            resolved_call
+                            for resolved_call in resolved_calls
+                            if resolved_call in explicit_only
+                            and resolved_call != function_name
+                        )
                 if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
                     if node.id in explicit_only and node.id != function_name:
                         referenced_explicit.add(node.id)
