@@ -78,6 +78,11 @@ class LegacyToolContractTests(unittest.TestCase):
         }
         explicit_only = set(self.contract["never_auto_chain"])
 
+        self.assertFalse(
+            any(isinstance(node, (ast.ClassDef, ast.Lambda)) for node in ast.walk(module)),
+            "the server contract permits top-level functions only",
+        )
+
         parents = {
             child: parent
             for parent in ast.walk(module)
