@@ -86,7 +86,15 @@ class OletoolsAdapterTests(unittest.TestCase):
 
     def test_web_audit_deduplicates_inventory_with_uro_and_records_counts(self):
         completed = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="https://example.test/start\nhttps://example.test/next\n", stderr=""
+            args=[],
+            returncode=0,
+            stdout=(
+                "https://example.test/start\n"
+                "https://outside.test/injected\n"
+                "https://example.test/not-in-inventory\n"
+                "https://example.test/next\n"
+            ),
+            stderr="",
         )
         child = AsyncMock(return_value="ok")
         headers = AsyncMock(
@@ -111,6 +119,7 @@ class OletoolsAdapterTests(unittest.TestCase):
         self.assertIn("Deduplicated crawl inventory (2)", response)
         self.assertIn("https://example.test/next", response)
         self.assertNotIn("outside.test", execute.call_args.kwargs["input_text"])
+        self.assertNotIn("not-in-inventory", response)
         self.assertEqual(
             [("https://example.test/start",), ("https://example.test/next",)],
             [call.args for call in nikto.await_args_list],
