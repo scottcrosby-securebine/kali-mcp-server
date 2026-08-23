@@ -1,27 +1,12 @@
 import asyncio
 import os
-import sys
-import types
 import unittest
 from unittest.mock import patch
 
-fake_fastmcp = types.ModuleType("mcp.server.fastmcp")
+from server_test_support import load_server
 
 
-class FakeFastMCP:
-    def __init__(self, _name):
-        pass
-
-    def tool(self):
-        return lambda function: function
-
-
-fake_fastmcp.FastMCP = FakeFastMCP
-sys.modules.setdefault("mcp", types.ModuleType("mcp"))
-sys.modules.setdefault("mcp.server", types.ModuleType("mcp.server"))
-sys.modules.setdefault("mcp.server.fastmcp", fake_fastmcp)
-
-import kali_pentest_server as server
+server, _mcp = load_server()
 
 
 class ProfileCapabilityTests(unittest.TestCase):
