@@ -132,6 +132,30 @@ class LegacyToolContractTests(unittest.TestCase):
                     module_callable_targets.setdefault(target.id, set()).update(
                         referenced_targets
                     )
+        mutating_methods = {"append", "extend", "insert", "update", "setdefault"}
+        for statement in module.body:
+            if not (
+                isinstance(statement, ast.Expr)
+                and isinstance(statement.value, ast.Call)
+                and isinstance(statement.value.func, ast.Attribute)
+                and statement.value.func.attr in mutating_methods
+                and isinstance(statement.value.func.value, ast.Name)
+            ):
+                continue
+            referenced_targets = set()
+            for reference in (
+                node.id
+                for argument in [*statement.value.args, *(keyword.value for keyword in statement.value.keywords)]
+                for node in ast.walk(argument)
+                if isinstance(node, ast.Name)
+            ):
+                referenced_targets.update(module_callable_targets.get(reference, set()))
+                resolved = module_aliases.get(reference, reference)
+                if resolved in module_functions:
+                    referenced_targets.add(resolved)
+            module_callable_targets.setdefault(
+                statement.value.func.value.id, set()
+            ).update(referenced_targets)
         class_callable_aliases = set()
         for class_definition in (
             node for node in module.body if isinstance(node, ast.ClassDef)
@@ -155,6 +179,23 @@ class LegacyToolContractTests(unittest.TestCase):
                     target.id for target in targets if isinstance(target, ast.Name)
                 )
             class_callable_aliases.update(local_callable_aliases)
+            for statement in class_definition.body:
+                if not (
+                    isinstance(statement, ast.Expr)
+                    and isinstance(statement.value, ast.Call)
+                    and isinstance(statement.value.func, ast.Attribute)
+                    and statement.value.func.attr in mutating_methods
+                    and isinstance(statement.value.func.value, ast.Name)
+                ):
+                    continue
+                if any(
+                    module_aliases.get(node.id, node.id) in module_functions
+                    or node.id in local_callable_aliases
+                    for argument in [*statement.value.args, *(keyword.value for keyword in statement.value.keywords)]
+                    for node in ast.walk(argument)
+                    if isinstance(node, ast.Name)
+                ):
+                    class_callable_aliases.add(statement.value.func.value.id)
         assignment_statements = module_assignments + class_assignments
         module_explicit_containers = set()
         changed = True
