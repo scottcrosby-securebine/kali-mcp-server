@@ -116,21 +116,39 @@ class LegacyToolContractTests(unittest.TestCase):
                         module_aliases[target.id] = resolved
                     else:
                         module_aliases.pop(target.id, None)
+        module_callable_targets = {}
+        for statement in module_assignments:
+            referenced_targets = set()
+            for reference in (
+                node.id for node in ast.walk(statement.value) if isinstance(node, ast.Name)
+            ):
+                referenced_targets.update(module_callable_targets.get(reference, set()))
+                resolved = module_aliases.get(reference, reference)
+                if resolved in module_functions:
+                    referenced_targets.add(resolved)
+            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    module_callable_targets.setdefault(target.id, set()).update(
+                        referenced_targets
+                    )
         class_callable_aliases = set()
         for class_definition in (
             node for node in module.body if isinstance(node, ast.ClassDef)
         ):
             local_callable_aliases = set()
             for statement in class_definition.body:
-                if not isinstance(statement, (ast.Assign, ast.AnnAssign)) or not isinstance(
-                    statement.value, ast.Name
-                ):
+                if not isinstance(statement, (ast.Assign, ast.AnnAssign)) or statement.value is None:
                     continue
-                source = statement.value.id
-                if (
-                    module_aliases.get(source, source) not in module_functions
-                    and source not in local_callable_aliases
+                referenced_targets = set()
+                for reference in (
+                    node.id for node in ast.walk(statement.value) if isinstance(node, ast.Name)
                 ):
+                    referenced_targets.update(module_callable_targets.get(reference, set()))
+                    resolved = module_aliases.get(reference, reference)
+                    if resolved in module_functions or reference in local_callable_aliases:
+                        referenced_targets.add(resolved)
+                if not referenced_targets:
                     continue
                 targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
                 local_callable_aliases.update(
@@ -169,16 +187,20 @@ class LegacyToolContractTests(unittest.TestCase):
                     node
                     for node in ast.walk(definition)
                     if isinstance(node, (ast.Assign, ast.AnnAssign))
-                    and isinstance(node.value, ast.Name)
+                    and node.value is not None
                 ),
                 key=lambda node: node.lineno,
             )
             for statement in local_assignments:
-                source = statement.value.id
-                resolved_targets = local_aliases.get(source)
-                if resolved_targets is None:
+                resolved_targets = set()
+                for source in (
+                    node.id for node in ast.walk(statement.value) if isinstance(node, ast.Name)
+                ):
+                    resolved_targets.update(local_aliases.get(source, set()))
+                    resolved_targets.update(module_callable_targets.get(source, set()))
                     resolved = module_aliases.get(source, source)
-                    resolved_targets = {resolved} if resolved in module_functions else set()
+                    if resolved in module_functions:
+                        resolved_targets.add(resolved)
                 targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
                 for target in targets:
                     if not isinstance(target, ast.Name):
@@ -189,9 +211,9 @@ class LegacyToolContractTests(unittest.TestCase):
                     if isinstance(node.func, ast.Name):
                         resolved_calls = local_aliases.get(node.func.id)
                         if resolved_calls is None:
-                            resolved_calls = {
-                                module_aliases.get(node.func.id, node.func.id)
-                            }
+                            resolved_calls = module_callable_targets.get(node.func.id)
+                        if resolved_calls is None:
+                            resolved_calls = {module_aliases.get(node.func.id, node.func.id)}
                         called_names.update(resolved_calls)
                         referenced_explicit.update(
                             resolved_call
