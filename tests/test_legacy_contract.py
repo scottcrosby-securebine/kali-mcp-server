@@ -111,6 +111,14 @@ class LegacyToolContractTests(unittest.TestCase):
                         definitions,
                         f"{function_name} must call server functions by name",
                     )
+                if isinstance(node.func, ast.Name):
+                    self.assertNotIn(
+                        node.func.id,
+                        {"eval", "exec", "getattr", "globals", "locals", "__import__"},
+                        f"{function_name} must not use dynamic dispatch",
+                    )
+                elif node.func.attr == "import_module":
+                    self.fail(f"{function_name} must not use dynamic dispatch")
 
         for function_name, definition in definitions.items():
             chained_explicit_tools = {
@@ -127,19 +135,32 @@ class LegacyToolContractTests(unittest.TestCase):
                 f"{function_name} must not auto-chain explicit-only tools",
             )
 
-        direct_calls = {
-            function_name: [
-                name
-                for _line, name in sorted(
-                    (node.lineno, node.func.id)
-                    for node in ast.walk(definition)
-                    if isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id in definitions
-                )
+        direct_calls = {}
+        for function_name, definition in definitions.items():
+            server_calls = [
+                node
+                for node in ast.walk(definition)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in definitions
             ]
-            for function_name, definition in definitions.items()
-        }
+            self.assertEqual(
+                len(server_calls),
+                len({node.lineno for node in server_calls}),
+                f"{function_name} must have at most one server call per line",
+            )
+            for call in server_calls:
+                ancestor = parents[call]
+                while ancestor is not definition:
+                    self.assertNotIsInstance(
+                        ancestor,
+                        ast.Call,
+                        f"{function_name} must not nest server calls",
+                    )
+                    ancestor = parents[ancestor]
+            direct_calls[function_name] = [
+                node.func.id for node in sorted(server_calls, key=lambda node: node.lineno)
+            ]
         public_call_graph = {}
         for tool_name in public_names:
             reachable = set()
