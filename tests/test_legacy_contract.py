@@ -98,15 +98,20 @@ class LegacyToolContractTests(unittest.TestCase):
             if isinstance(statement, (ast.Assign, ast.AnnAssign))
             and statement.value is not None
         ]
-        for statement in assignment_statements:
-            if (
-                isinstance(statement.value, ast.Name)
-                and statement.value.id in module_functions
-            ):
+        changed = True
+        while changed:
+            changed = False
+            for statement in assignment_statements:
+                if not isinstance(statement.value, ast.Name):
+                    continue
+                resolved = module_aliases.get(statement.value.id, statement.value.id)
+                if resolved not in module_functions:
+                    continue
                 targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
                 for target in targets:
-                    if isinstance(target, ast.Name):
-                        module_aliases[target.id] = statement.value.id
+                    if isinstance(target, ast.Name) and target.id not in module_aliases:
+                        module_aliases[target.id] = resolved
+                        changed = True
         module_explicit_containers = set()
         changed = True
         while changed:
