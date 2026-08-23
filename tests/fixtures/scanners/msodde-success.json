@@ -1,0 +1,4 @@
+[
+  {"msg":"tool banner","level":"WARNING","type":"msg"},
+  {"type":"dde","field":"DDEAUTO cmd /c calc","source":"word/document.xml"}
+]

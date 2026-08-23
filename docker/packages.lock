@@ -38,3 +38,5 @@ subfinder=2.14.0-0kali1
 amass=5.1.1-0kali3
 trivy=0.66.0-0kali1
 syft=1.49.0+ds-0kali1
+oletools=0.60.2-0kali1
+uro=1.0.2-0kali1

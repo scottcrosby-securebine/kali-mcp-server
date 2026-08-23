@@ -70,7 +70,7 @@ This MCP server provides powerful penetration testing and security assessment to
 
 This MCP server provides AI assistants like Claude with access to professional penetration testing tools for authorized security assessments. It includes:
 
-- **42 preserved security calls plus 2 daemonless scanners**
+- **42 preserved security calls plus 3 bounded scanners**
 - **ARM64 Optimized** for Apple Silicon Macs (M1/M2/M3)
 - **Docker MCP Compatible** - runs securely without raw socket access
 - **Input Sanitization** - prevents command injection attacks
@@ -89,7 +89,7 @@ This MCP server provides AI assistants like Claude with access to professional p
 | **Vulnerability Research** | 3 tools - searchsploit, Metasploit search/info, nuclei |
 | **OSINT** | 2 tools - theHarvester, whois lookups |
 | **Combined Operations** | 4 multi-tool workflows for comprehensive assessments |
-| **Container & Artifact Scanning** | 2 daemonless tools for mounted sources, archives, SBOMs, and public registries |
+| **Container & Artifact Scanning** | 3 bounded tools for mounted sources, archives, SBOMs, public registries, and Office files |
 
 ---
 
@@ -129,7 +129,7 @@ This MCP server provides AI assistants like Claude with access to professional p
 │  │ • enum4linux, crackmapexec, smbclient               │  │
 │  │ • hydra, john, hashcat                              │  │
 │  │ • searchsploit, metasploit, theHarvester            │  │
-│  │ • trivy, syft (explicit daemonless sources)          │  │
+│  │ • trivy, syft, oletools (bounded mounted inputs)     │  │
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
                            │
@@ -370,12 +370,13 @@ Once configured, you can ask Claude things like:
 | `web_audit` | Complete web application audit | `target` | `web_audit target="http://testapp.local"` |
 | `network_sweep` | Full network discovery | `target` | `network_sweep target="192.168.1.0/24"` |
 
-### Container & Artifact Scanning (2 additions)
+### Container & Artifact Scanning (3 additions)
 
 | Tool | Description | Parameters | Example |
 |------|-------------|------------|---------|
 | `trivy_scan` | Scan a mounted filesystem, SBOM, image archive, or explicit public-registry image | `target_ref`, `source_type` | `trivy_scan target_ref="project" source_type="filesystem"` |
 | `syft_sbom` | Generate an SBOM from a mounted source, archive, OCI layout, or explicit public-registry image | `target_ref`, `source_type`, `format` | `syft_sbom target_ref="project" source_type="dir" format="cyclonedx-json"` |
+| `oletools_scan` | Analyze one bounded mounted Office artifact with olevba or msodde | `artifact_ref`, `analyzer` | `oletools_scan artifact_ref="sample.docm" analyzer="olevba"` |
 
 ---
 

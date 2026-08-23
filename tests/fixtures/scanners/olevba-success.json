@@ -1,0 +1,4 @@
+[
+  {"script_name":"olevba","version":"0.60.2","type":"MetaInformation"},
+  {"file":"/artifacts/sample.docm","type":"OpenXML","analysis":[{"type":"Suspicious","keyword":"AutoOpen","description":"Runs when opened"}],"macros":[{"code":"password: NEVER-PERSIST-MACRO-CODE"}]}
+]

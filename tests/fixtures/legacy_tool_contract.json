@@ -2,7 +2,8 @@
   "schema_version": 1,
   "additions": [
     {"name":"trivy_scan","parameters":[{"name":"target_ref","default":""},{"name":"source_type","default":"filesystem"}],"return":"str"},
-    {"name":"syft_sbom","parameters":[{"name":"target_ref","default":""},{"name":"source_type","default":"dir"},{"name":"format","default":"cyclonedx-json"}],"return":"str"}
+    {"name":"syft_sbom","parameters":[{"name":"target_ref","default":""},{"name":"source_type","default":"dir"},{"name":"format","default":"cyclonedx-json"}],"return":"str"},
+    {"name":"oletools_scan","parameters":[{"name":"artifact_ref","default":""},{"name":"analyzer","default":"olevba"}],"return":"str"}
   ],
   "tools": [
     {"name":"nmap_scan","parameters":[{"name":"target","default":""},{"name":"ports","default":""}],"return":"str"},

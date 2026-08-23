@@ -28,7 +28,7 @@ for lock_file in ${lock_files}; do
     done < "${lock_file}"
 done
 
-required_binaries="python3 nmap dig dnsrecon dnsenum fierce whois nc nikto wpscan sqlmap dirb ffuf gobuster wfuzz whatweb wafw00f sslscan sslyze testssl enum4linux nbtscan smbclient crackmapexec responder hydra john hashcat searchsploit msfconsole nuclei theHarvester subfinder amass trivy syft"
+required_binaries="python3 nmap dig dnsrecon dnsenum fierce whois nc nikto wpscan sqlmap dirb ffuf gobuster wfuzz whatweb wafw00f sslscan sslyze testssl enum4linux nbtscan smbclient crackmapexec responder hydra john hashcat searchsploit msfconsole nuclei theHarvester subfinder amass trivy syft olevba msodde uro"
 
 for binary in ${required_binaries}; do
     command -v "${binary}" >/dev/null 2>&1 || {
