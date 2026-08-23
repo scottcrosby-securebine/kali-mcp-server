@@ -77,7 +77,7 @@ class ReportTests(unittest.TestCase):
                     "Severity": "HIGH",
                     "Evidence": "Authorization: Bearer REPORT-SECRET",
                     "PrivateMaterial": "-----BEGIN PRIVATE KEY-----\nPEM-SECRET\n-----END PRIVATE KEY-----",
-                    "Tokens": "Basic dXNlcjpwYXNz ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
+                    "Tokens": "Basic dXNlcjpwYXNz ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890 xoxb-SLACKSECRET sk_live_STRIPESECRET glpat-GITLABSECRET",
                     "Database": "mongodb://admin:DB-SECRET@example.test/app",
                     "Remediation": "Upgrade package",
                 },
@@ -111,7 +111,7 @@ class ReportTests(unittest.TestCase):
                 self.assertIn(heading, report)
             for retained in ("demo&lt;&amp;", "CVE-TEST-1", "Upgrade package", "0.66.0", "2026-08-24"):
                 self.assertIn(retained, report)
-            for forbidden in ("<script", "REPORT-SECRET", "PEM-SECRET", "dXNlcjpwYXNz", "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", "DB-SECRET", "<img", "<iframe"):
+            for forbidden in ("<script", "REPORT-SECRET", "PEM-SECRET", "dXNlcjpwYXNz", "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", "SLACKSECRET", "STRIPESECRET", "GITLABSECRET", "DB-SECRET", "<img", "<iframe"):
                 self.assertNotIn(forbidden, report)
             self.assertNotIn("<script", report.lower())
             self.assertIn("Content-Security-Policy", report)
@@ -199,6 +199,8 @@ class ReportTests(unittest.TestCase):
                     report = artifacts[0].read_text(encoding="utf-8")
                     self.assertIn(status, report.lower())
                     self.assertIn("nmap_service_scan", report)
+                    self.assertIn("1:9.20.26-1", report)
+                    self.assertIn("2.1.5-1", report)
                     if status == "partial":
                         self.assertIn("dns failed", report)
                 else:
@@ -216,7 +218,7 @@ class ReportTests(unittest.TestCase):
                 patch.object(self.server.secrets, "token_urlsafe", return_value="W" * 32),
                 patch.object(self.server, "whatweb_scan", AsyncMock(return_value="✅ whatweb")),
                 patch.object(self.server, "wafw00f_scan", AsyncMock(return_value="✅ waf")),
-                patch.object(self.server, "web_headers", AsyncMock(return_value="✅ headers")),
+                patch.object(self.server, "web_headers", AsyncMock(return_value="✅ headers\nSet-Cookie: sessionid=COOKIE-SECRET; HttpOnly")),
                 patch.object(self.server, "_deduplicate_url_inventory", AsyncMock(return_value=["https://example.test"])),
                 patch.object(self.server, "nikto_scan", AsyncMock(return_value="✅ nikto")),
                 patch.object(self.server, "nuclei_scan", AsyncMock(return_value=nuclei_result)),
@@ -230,6 +232,7 @@ class ReportTests(unittest.TestCase):
             report = artifacts[0].read_text(encoding="utf-8")
             self.assertIn("partial", report.lower())
             self.assertIn("beyond-public-bound", report)
+            self.assertNotIn("COOKIE-SECRET", report)
 
     def test_web_audit_total_failure_writes_no_report(self):
         with tempfile.TemporaryDirectory() as root_text:

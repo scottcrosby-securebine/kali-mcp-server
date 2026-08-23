@@ -215,6 +215,25 @@ class ScannerAdapterTests(unittest.TestCase):
             self.assertEqual("keep-me", existing.read_text(encoding="utf-8"))
             self.assertEqual(2, len(list(root.iterdir())))
 
+    def test_trivy_database_provenance_is_pinned_when_the_scan_result_is_stored(self):
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=fixture("trivy-success.json"), stderr="")
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            results = root / "results"
+            results.mkdir()
+            db_metadata = root / "metadata.json"
+            db_metadata.write_text(json.dumps({"Version": 2, "UpdatedAt": "scan-time"}), encoding="utf-8")
+            with (
+                patch.object(self.server, "RESULTS_ROOT", results),
+                patch.object(self.server, "TRIVY_DB_METADATA_PATH", db_metadata),
+                patch.object(self.server.subprocess, "run", return_value=completed),
+            ):
+                asyncio.run(self.server.trivy_scan("demo", "filesystem"))
+            db_metadata.write_text(json.dumps({"Version": 3, "UpdatedAt": "later"}), encoding="utf-8")
+            stored = json.loads(next(results.iterdir()).read_text(encoding="utf-8"))
+            self.assertEqual(2, stored["metadata"]["database_Version"])
+            self.assertEqual("scan-time", stored["metadata"]["database_UpdatedAt"])
+
 
 if __name__ == "__main__":
     unittest.main()
