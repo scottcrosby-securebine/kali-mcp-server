@@ -215,6 +215,25 @@ class LegacyToolContractTests(unittest.TestCase):
                 f"{tool_name} must not auto-chain explicit-only tools",
             )
 
+        for composite in self.contract["composites"]:
+            reachable = set()
+            pending = [composite]
+            while pending:
+                function_name = pending.pop()
+                if function_name in reachable:
+                    continue
+                reachable.add(function_name)
+                pending.extend(
+                    called
+                    for called in call_graph.get(function_name, set()) - reachable
+                    if called not in public_names or called == composite
+                )
+            self.assertNotIn(
+                "run_command",
+                reachable,
+                f"{composite} must delegate through public tool wrappers",
+            )
+
     def _run_composite(self, composite, target, expected_calls):
         call_log = []
         with ExitStack() as stack:
