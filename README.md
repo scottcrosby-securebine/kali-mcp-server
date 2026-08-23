@@ -70,7 +70,7 @@ This MCP server provides powerful penetration testing and security assessment to
 
 This MCP server provides AI assistants like Claude with access to professional penetration testing tools for authorized security assessments. It includes:
 
-- **42 preserved security calls plus 3 bounded scanners**
+- **42 preserved security calls plus 4 bounded additions**
 - **ARM64 Optimized** for Apple Silicon Macs (M1/M2/M3)
 - **Docker MCP Compatible** - runs securely without raw socket access
 - **Input Sanitization** - prevents command injection attacks
@@ -379,6 +379,7 @@ Nuclei defaults to the reviewed template set in `nuclei-templates/manifest.json`
 | `trivy_scan` | Scan a mounted filesystem, SBOM, image archive, or explicit public-registry image | `target_ref`, `source_type` | `trivy_scan target_ref="project" source_type="filesystem"` |
 | `syft_sbom` | Generate an SBOM from a mounted source, archive, OCI layout, or explicit public-registry image | `target_ref`, `source_type`, `format` | `syft_sbom target_ref="project" source_type="dir" format="cyclonedx-json"` |
 | `oletools_scan` | Analyze one bounded mounted Office artifact with olevba or msodde | `artifact_ref`, `analyzer` | `oletools_scan artifact_ref="sample.docm" analyzer="olevba"` |
+| `generate_report` | Render a self-contained local HTML report from a supported opaque scanner result ID | `result_ref`, `format` | `generate_report result_ref="<result-id>"` |
 
 ---
 
