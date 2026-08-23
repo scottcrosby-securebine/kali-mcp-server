@@ -100,6 +100,17 @@ class LegacyToolContractTests(unittest.TestCase):
                 isinstance(parent, ast.Call) and parent.func is node,
                 f"server function {node.id} must be called directly, not stored or dispatched",
             )
+            enclosing = parent
+            while enclosing is not module and not (
+                isinstance(enclosing, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and enclosing.name in definitions
+            ):
+                enclosing = parents[enclosing]
+            self.assertIsNot(
+                module,
+                enclosing,
+                f"server function {node.id} must not run at module scope",
+            )
 
         for function_name, definition in definitions.items():
             nested_scopes = [
