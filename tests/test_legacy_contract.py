@@ -91,25 +91,37 @@ class LegacyToolContractTests(unittest.TestCase):
         }
         module_functions = set(definitions)
         module_aliases = {}
-        module_explicit_containers = set()
-        for statement in module.body:
+        assignment_statements = [
+            statement
+            for scope in [module, *(node for node in module.body if isinstance(node, ast.ClassDef))]
+            for statement in scope.body
+            if isinstance(statement, (ast.Assign, ast.AnnAssign))
+            and statement.value is not None
+        ]
+        for statement in assignment_statements:
             if (
-                isinstance(statement, (ast.Assign, ast.AnnAssign))
-                and isinstance(statement.value, ast.Name)
+                isinstance(statement.value, ast.Name)
                 and statement.value.id in module_functions
             ):
                 targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
                 for target in targets:
                     if isinstance(target, ast.Name):
                         module_aliases[target.id] = statement.value.id
-            if isinstance(statement, (ast.Assign, ast.AnnAssign)) and statement.value is not None and any(
-                isinstance(node, ast.Name) and node.id in explicit_only
-                for node in ast.walk(statement.value)
-            ):
-                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-                module_explicit_containers.update(
-                    target.id for target in targets if isinstance(target, ast.Name)
-                )
+        module_explicit_containers = set()
+        changed = True
+        while changed:
+            changed = False
+            tainted = explicit_only | module_explicit_containers
+            for statement in assignment_statements:
+                if any(
+                    isinstance(node, ast.Name) and node.id in tainted
+                    for node in ast.walk(statement.value)
+                ):
+                    targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                    for target in targets:
+                        if isinstance(target, ast.Name) and target.id not in module_explicit_containers:
+                            module_explicit_containers.add(target.id)
+                            changed = True
         call_graph = {}
         explicit_references = {}
         forbidden_dynamic_dispatch = {"eval", "exec", "getattr", "globals", "locals", "__import__"}
@@ -130,6 +142,8 @@ class LegacyToolContractTests(unittest.TestCase):
                 elif isinstance(node, ast.Attribute) and node.attr in explicit_only:
                     if node.attr != function_name:
                         referenced_explicit.add(node.attr)
+                elif isinstance(node, ast.Attribute) and node.attr in module_explicit_containers:
+                    referenced_explicit.add(node.attr)
                 elif isinstance(node, ast.Constant) and node.value in explicit_only:
                     referenced_explicit.add(node.value)
                 if (
@@ -167,6 +181,7 @@ class LegacyToolContractTests(unittest.TestCase):
     def _run_composite(self, composite, target, expected_calls):
         call_log = []
         with ExitStack() as stack:
+            run_command = stack.enter_context(patch.object(self.server, "run_command"))
             public_tools = [
                 tool["name"]
                 for tool in self.contract["tools"] + self.contract["additions"]
@@ -180,6 +195,7 @@ class LegacyToolContractTests(unittest.TestCase):
             result = asyncio.run(getattr(self.server, composite)(target))
         self.assertIsInstance(result, str)
         self.assertEqual(expected_calls, call_log)
+        run_command.assert_not_called()
 
     def test_composites_preserve_exact_runtime_order_arguments_and_conditions(self):
         cases = (
