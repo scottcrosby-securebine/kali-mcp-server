@@ -97,6 +97,17 @@ class LegacyToolContractTests(unittest.TestCase):
             )
 
         for function_name, definition in definitions.items():
+            nested_scopes = [
+                node
+                for node in ast.walk(definition)
+                if node is not definition
+                and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
+            ]
+            self.assertEqual(
+                [],
+                nested_scopes,
+                f"{function_name} must not define nested callable scopes",
+            )
             for node in ast.walk(definition):
                 if not isinstance(node, ast.Call):
                     continue
