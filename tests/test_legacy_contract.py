@@ -112,7 +112,7 @@ class LegacyToolContractTests(unittest.TestCase):
             )
 
         public_call_graph = {}
-        for tool_name in public_names - explicit_only:
+        for tool_name in public_names:
             awaited = [
                 node.value
                 for node in ast.walk(definitions[tool_name])
