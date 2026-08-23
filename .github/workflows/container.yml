@@ -1,0 +1,47 @@
+name: container
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build platform image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: kali-mcp:smoke
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+      - name: Verify locked image
+        run: docker run --rm --platform "${{ matrix.platform }}" --security-opt=no-new-privileges --entrypoint verify-kali-mcp-image kali-mcp:smoke
+      - name: Record package and image evidence
+        run: |
+          mkdir -p release-evidence
+          platform_name="${{ matrix.platform }}"
+          platform_name="${platform_name//\//-}"
+          docker image inspect kali-mcp:smoke > "release-evidence/${platform_name}-image.json"
+          docker run --rm --platform "${{ matrix.platform }}" --entrypoint dpkg-query kali-mcp:smoke -W '-f=${Package}\t${Version}\t${Architecture}\n' > "release-evidence/${platform_name}-packages.tsv"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ strategy.job-index }}
+          path: release-evidence/
