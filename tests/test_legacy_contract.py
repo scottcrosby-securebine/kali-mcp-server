@@ -175,27 +175,30 @@ class LegacyToolContractTests(unittest.TestCase):
             )
             for statement in local_assignments:
                 source = statement.value.id
-                resolved = local_aliases.get(
-                    source, module_aliases.get(source, source)
-                )
+                resolved_targets = local_aliases.get(source)
+                if resolved_targets is None:
+                    resolved = module_aliases.get(source, source)
+                    resolved_targets = {resolved} if resolved in module_functions else set()
                 targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
                 for target in targets:
                     if not isinstance(target, ast.Name):
                         continue
-                    if resolved in module_functions:
-                        local_aliases[target.id] = resolved
-                    else:
-                        local_aliases.pop(target.id, None)
+                    local_aliases.setdefault(target.id, set()).update(resolved_targets)
             for node in ast.walk(definition):
                 if isinstance(node, ast.Call):
                     if isinstance(node.func, ast.Name):
-                        resolved_call = local_aliases.get(
-                            node.func.id,
-                            module_aliases.get(node.func.id, node.func.id),
+                        resolved_calls = local_aliases.get(node.func.id)
+                        if resolved_calls is None:
+                            resolved_calls = {
+                                module_aliases.get(node.func.id, node.func.id)
+                            }
+                        called_names.update(resolved_calls)
+                        referenced_explicit.update(
+                            resolved_call
+                            for resolved_call in resolved_calls
+                            if resolved_call in explicit_only
+                            and resolved_call != function_name
                         )
-                        called_names.add(resolved_call)
-                        if resolved_call in explicit_only and resolved_call != function_name:
-                            referenced_explicit.add(resolved_call)
                     elif isinstance(node.func, ast.Attribute):
                         called_names.add(node.func.attr)
                 if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
