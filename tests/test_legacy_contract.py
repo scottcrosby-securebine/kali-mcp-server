@@ -30,7 +30,7 @@ class LegacyToolContractTests(unittest.TestCase):
         names = [tool["name"] for tool in self.contract["tools"]]
         self.assertEqual(42, len(names))
         self.assertEqual(42, len(set(names)))
-        for tool in self.contract["tools"]:
+        for tool in self.contract["tools"] + self.contract["additions"]:
             self.assertEqual({"name", "parameters", "return"}, set(tool))
             self.assertEqual("str", tool["return"])
             for parameter in tool["parameters"]:
@@ -38,7 +38,7 @@ class LegacyToolContractTests(unittest.TestCase):
                 self.assertIsInstance(parameter["default"], str)
 
     def test_every_legacy_signature_matches_exactly(self):
-        for expected in self.contract["tools"]:
+        for expected in self.contract["tools"] + self.contract["additions"]:
             with self.subTest(tool=expected["name"]):
                 function = getattr(self.server, expected["name"])
                 signature = inspect.signature(function)
@@ -88,6 +88,7 @@ class LegacyToolContractTests(unittest.TestCase):
         }
         module_functions = set(definitions)
         module_aliases = {}
+        module_explicit_containers = set()
         for statement in module.body:
             if (
                 isinstance(statement, (ast.Assign, ast.AnnAssign))
@@ -98,8 +99,17 @@ class LegacyToolContractTests(unittest.TestCase):
                 for target in targets:
                     if isinstance(target, ast.Name):
                         module_aliases[target.id] = statement.value.id
+            if isinstance(statement, (ast.Assign, ast.AnnAssign)) and statement.value is not None and any(
+                isinstance(node, ast.Name) and node.id in explicit_only
+                for node in ast.walk(statement.value)
+            ):
+                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                module_explicit_containers.update(
+                    target.id for target in targets if isinstance(target, ast.Name)
+                )
         call_graph = {}
         explicit_references = {}
+        forbidden_dynamic_dispatch = {"eval", "exec", "getattr", "globals", "locals", "__import__"}
         for function_name, definition in definitions.items():
             called_names = set()
             referenced_explicit = set()
@@ -112,11 +122,24 @@ class LegacyToolContractTests(unittest.TestCase):
                 if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
                     if node.id in explicit_only and node.id != function_name:
                         referenced_explicit.add(node.id)
+                    elif node.id in module_explicit_containers:
+                        referenced_explicit.add(node.id)
                 elif isinstance(node, ast.Attribute) and node.attr in explicit_only:
                     if node.attr != function_name:
                         referenced_explicit.add(node.attr)
                 elif isinstance(node, ast.Constant) and node.value in explicit_only:
                     referenced_explicit.add(node.value)
+                if (
+                    isinstance(node, ast.Call)
+                    and (
+                        isinstance(node.func, ast.Name)
+                        and node.func.id in forbidden_dynamic_dispatch
+                        or isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "import_module"
+                    )
+                ):
+                    dispatch_name = node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+                    referenced_explicit.add(f"dynamic-dispatch:{dispatch_name}")
             call_graph[function_name] = called_names & module_functions
             explicit_references[function_name] = referenced_explicit
 
