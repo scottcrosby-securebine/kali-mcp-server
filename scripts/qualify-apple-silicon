@@ -13,6 +13,15 @@ import subprocess
 import sys
 
 
+def validate_image_reference(image: str, digest: str) -> str:
+    """Require the tested image reference to carry the recorded release digest."""
+    if not re.fullmatch(r"sha256:[a-f0-9]{64}", digest):
+        raise ValueError("--image-digest must be an immutable sha256 digest")
+    if not image.endswith(f"@{digest}"):
+        raise ValueError("--image must end with @<the exact --image-digest value>")
+    return image
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True)
@@ -22,8 +31,10 @@ def main() -> int:
 
     if platform.system() != "Darwin" or platform.machine().lower() not in {"arm64", "aarch64"}:
         parser.error("Apple Silicon qualification must run on a Darwin/arm64 host")
-    if not re.fullmatch(r"sha256:[a-f0-9]{64}", args.image_digest):
-        parser.error("--image-digest must be an immutable sha256 digest")
+    try:
+        validate_image_reference(args.image, args.image_digest)
+    except ValueError as error:
+        parser.error(str(error))
 
     repo = Path(__file__).resolve().parent.parent
     command = [

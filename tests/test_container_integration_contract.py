@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import runpy
 import unittest
 
 
@@ -30,6 +31,22 @@ class ContainerIntegrationContractTests(unittest.TestCase):
         qualifier = (ROOT / "scripts/qualify-apple-silicon").read_text(encoding="utf-8")
         self.assertIn('parser.add_argument("--image-digest", required=True)', qualifier)
         self.assertNotIn("hashlib", qualifier)
+
+    def test_apple_qualification_binds_the_tested_reference_to_its_digest(self):
+        qualifier = runpy.run_path(str(ROOT / "scripts/qualify-apple-silicon"))
+        validate = qualifier["validate_image_reference"]
+        digest = "sha256:" + "a" * 64
+        self.assertEqual(
+            f"registry.invalid/kali-mcp@{digest}",
+            validate(f"registry.invalid/kali-mcp@{digest}", digest),
+        )
+        with self.assertRaisesRegex(ValueError, "must end with"):
+            validate("registry.invalid/kali-mcp:latest", digest)
+        with self.assertRaisesRegex(ValueError, "must end with"):
+            validate(
+                f"registry.invalid/kali-mcp@{'sha256:' + 'b' * 64}",
+                digest,
+            )
 
     def test_fixture_registry_and_scan_targets_are_loopback_only(self):
         harness = (ROOT / "tests/integration/run_container_integration.py").read_text(encoding="utf-8")
