@@ -1,0 +1,8 @@
+{
+  "name": "kali-mcp-hermetic-fixture",
+  "version": "1.0.0",
+  "license": "MIT",
+  "dependencies": {
+    "is-number": "7.0.0"
+  }
+}

@@ -46,6 +46,8 @@ jobs:
             BUILD_DATE=${{ github.event.repository.updated_at }}
       - name: Verify locked image
         run: docker run --rm --platform "${{ matrix.platform }}" --security-opt=no-new-privileges --entrypoint verify-kali-mcp-image kali-mcp:smoke
+      - name: Run hermetic container integration gate
+        run: python3 tests/integration/run_container_integration.py --image kali-mcp:smoke --platform "${{ matrix.platform }}"
       - name: Record package and image evidence
         run: |
           mkdir -p release-evidence

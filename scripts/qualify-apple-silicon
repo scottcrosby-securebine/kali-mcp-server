@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Run the real integration gate on Apple Silicon and write qualification evidence."""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+import platform
+from pathlib import Path
+import subprocess
+import sys
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--image", required=True)
+    parser.add_argument("--evidence", required=True, type=Path)
+    args = parser.parse_args()
+
+    if platform.system() != "Darwin" or platform.machine().lower() not in {"arm64", "aarch64"}:
+        parser.error("Apple Silicon qualification must run on a Darwin/arm64 host")
+
+    repo = Path(__file__).resolve().parent.parent
+    command = [
+        sys.executable,
+        str(repo / "tests/integration/run_container_integration.py"),
+        "--image", args.image,
+        "--platform", "linux/arm64",
+        "--profile", "mac-hardened",
+        "--fixture-host", "host.docker.internal",
+    ]
+    completed = subprocess.run(command, text=True, capture_output=True)
+    inspect = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", args.image],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    digest = inspect.stdout.strip()
+    if not digest.startswith("sha256:"):
+        digest = "sha256:" + hashlib.sha256(digest.encode()).hexdigest()
+    evidence = {
+        "schema_version": 1,
+        "qualified_at": datetime.now(timezone.utc).isoformat(),
+        "host": {
+            "system": "Darwin",
+            "architecture": "arm64",
+            "docker_version": subprocess.run(
+                ["docker", "version", "--format", "{{.Server.Version}}"],
+                check=True, text=True, capture_output=True,
+            ).stdout.strip(),
+        },
+        "image": {"reference": args.image, "digest": digest},
+        "checks": [{
+            "name": "container-integration",
+            "status": "passed" if completed.returncode == 0 else "failed",
+            "detail": (completed.stdout + completed.stderr)[-4000:],
+        }],
+        "result": "passed" if completed.returncode == 0 else "failed",
+    }
+    args.evidence.parent.mkdir(parents=True, exist_ok=True)
+    args.evidence.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+    return completed.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/scottcrosby-securebine/kali-mcp-server/apple-silicon-evidence.schema.json",
+  "title": "Kali MCP Apple Silicon qualification evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "qualified_at", "host", "image", "checks", "result"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "qualified_at": {"type": "string", "format": "date-time"},
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system", "architecture", "docker_version"],
+      "properties": {
+        "system": {"const": "Darwin"},
+        "architecture": {"const": "arm64"},
+        "docker_version": {"type": "string", "minLength": 1}
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "digest"],
+      "properties": {
+        "reference": {"type": "string", "minLength": 1},
+        "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status", "detail"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "status": {"enum": ["passed", "failed", "not_run"]},
+          "detail": {"type": "string"}
+        }
+      }
+    },
+    "result": {"enum": ["passed", "failed"]}
+  }
+}
