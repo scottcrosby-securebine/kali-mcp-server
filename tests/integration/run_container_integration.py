@@ -23,7 +23,7 @@ import tarfile
 from typing import NamedTuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import build_opener, HTTPRedirectHandler, Request
 import uuid
 import zipfile
 
@@ -154,18 +154,30 @@ def _origin(url: str) -> tuple[str, str, int | None]:
     return parsed.scheme, parsed.hostname or "", parsed.port
 
 
+class RegistryHttpError(ValueError):
+    """A non-success registry response that must not be retried or redirected."""
+
+
+class _NoRedirects(HTTPRedirectHandler):
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
+
+
+REGISTRY_OPENER = build_opener(_NoRedirects())
+
+
 def _request(url: str, method: str, *, data: bytes | None, headers: dict, timeout: float):
     request = Request(url, data=data, headers=headers, method=method)
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with REGISTRY_OPENER.open(request, timeout=timeout) as response:
             status = response.status
             response_headers = response.headers
             response.read()
     except HTTPError as error:
         error.read()
-        raise ValueError(f"registry {method} {url} returned HTTP {error.code}") from error
+        raise RegistryHttpError(f"registry {method} {url} returned HTTP {error.code}") from error
     if not 200 <= status < 300:
-        raise ValueError(f"registry {method} {url} returned HTTP {status}")
+        raise RegistryHttpError(f"registry {method} {url} returned HTTP {status}")
     return response_headers
 
 
@@ -200,7 +212,7 @@ def publish_oci_fixture(
         try:
             _request(f"{endpoint}/v2/", "GET", data=None, headers={}, timeout=request_timeout)
             break
-        except (ValueError, URLError, TimeoutError, OSError) as error:
+        except (URLError, TimeoutError, OSError) as error:
             if time.monotonic() >= deadline:
                 raise ValueError(f"registry did not become ready at {endpoint}") from error
             time.sleep(0.1)
@@ -260,7 +272,12 @@ def temporary_fixture_image(platform_name: str, *, run_command=run):
     try:
         yield fixture_tag
     finally:
-        run_command(["docker", "image", "rm", "-f", fixture_tag], capture_output=True)
+        active_error = sys.exc_info()[1]
+        try:
+            run_command(["docker", "image", "rm", "-f", fixture_tag], capture_output=True)
+        except Exception:
+            if active_error is None:
+                raise
 
 
 class McpClient:

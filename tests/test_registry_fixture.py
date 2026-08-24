@@ -53,6 +53,29 @@ class RegistryHandler(BaseHTTPRequestHandler):
             self._reply(201, {"Docker-Content-Digest": digest})
 
 
+class SentinelHandler(BaseHTTPRequestHandler):
+    requests = 0
+
+    def log_message(self, _format, *_args):
+        return
+
+    def _record(self):
+        type(self).requests += 1
+        self.send_response(200)
+        self.end_headers()
+
+    do_GET = do_POST = do_PUT = do_HEAD = _record
+
+
+class RedirectReadinessHandler(RegistryHandler):
+    redirect_target = ""
+
+    def do_GET(self):
+        self.send_response(302)
+        self.send_header("Location", type(self).redirect_target)
+        self.end_headers()
+
+
 @contextmanager
 def registry_server(handler=RegistryHandler):
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -108,6 +131,19 @@ class RegistryPublicationTests(unittest.TestCase):
         with registry_server() as endpoint, self.assertRaisesRegex(ValueError, "manifest digest"):
             integration.publish_oci_fixture(endpoint, payloads, request_timeout=1)
 
+    def test_registry_http_redirect_is_rejected_without_contacting_target(self):
+        payloads = integration.create_oci_payloads("linux/amd64")
+        SentinelHandler.requests = 0
+        with registry_server(SentinelHandler) as sentinel:
+            RedirectReadinessHandler.redirect_target = sentinel + "/must-not-be-contacted"
+            with registry_server(RedirectReadinessHandler) as endpoint, self.assertRaisesRegex(
+                ValueError, "HTTP 302"
+            ):
+                integration.publish_oci_fixture(
+                    endpoint, payloads, request_timeout=0.2, readiness_timeout=0.25
+                )
+        self.assertEqual(0, SentinelHandler.requests)
+
     def test_temporary_fixture_image_is_cleaned_when_publication_fails(self):
         commands = []
 
@@ -120,6 +156,19 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertEqual("docker", commands[0][0])
         self.assertEqual(["docker", "image", "rm", "-f"], commands[-1][:4])
         self.assertEqual(commands[0][commands[0].index("-t") + 1], commands[-1][-1])
+
+    def test_cleanup_failure_does_not_mask_publication_failure(self):
+        calls = 0
+
+        def cleanup_fails(_command, **_kwargs):
+            nonlocal calls
+            calls += 1
+            if calls > 1:
+                raise RuntimeError("cleanup failed")
+
+        with self.assertRaisesRegex(RuntimeError, "upload failed"):
+            with integration.temporary_fixture_image("linux/amd64", run_command=cleanup_fails):
+                raise RuntimeError("upload failed")
 
 
 if __name__ == "__main__":

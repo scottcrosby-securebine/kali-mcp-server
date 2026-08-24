@@ -64,6 +64,14 @@ class ContainerIntegrationContractTests(unittest.TestCase):
         self.assertNotIn("class TcpFixture", harness)
         self.assertNotRegex(harness, r"(?m)^\s*assert\s")
 
+    def test_registry_is_seeded_by_host_http_without_daemon_registry_mutation(self):
+        harness = (ROOT / "tests/integration/run_container_integration.py").read_text(encoding="utf-8")
+        self.assertIn("publish_oci_fixture(endpoint, payloads)", harness)
+        self.assertNotIn('"push"', harness)
+        self.assertNotIn('"tag"', harness)
+        self.assertNotIn("local_push_ref", harness)
+        self.assertNotIn("insecure-registr", harness)
+
 
 if __name__ == "__main__":
     unittest.main()
