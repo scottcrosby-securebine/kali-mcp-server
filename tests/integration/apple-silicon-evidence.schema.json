@@ -21,10 +21,11 @@
     "image": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["reference", "digest"],
+      "required": ["reference", "digest", "image_id"],
       "properties": {
         "reference": {"type": "string", "minLength": 1},
-        "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+        "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "image_id": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
       }
     },
     "checks": {

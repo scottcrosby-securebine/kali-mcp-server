@@ -13,6 +13,7 @@ class ContainerIntegrationContractTests(unittest.TestCase):
         self.assertIn("linux/arm64", workflow)
         self.assertIn("tests/integration/run_container_integration.py", workflow)
         self.assertIn('--platform "${{ matrix.platform }}"', workflow)
+        self.assertIn("timeout-minutes:", workflow)
 
     def test_apple_silicon_evidence_schema_cannot_be_mistaken_for_ci_emulation(self):
         schema = json.loads(
@@ -24,14 +25,27 @@ class ContainerIntegrationContractTests(unittest.TestCase):
         self.assertEqual({"passed", "failed", "not_run"}, set(
             properties["checks"]["items"]["properties"]["status"]["enum"]
         ))
+        self.assertIn("image_id", properties["image"]["required"])
+
+        qualifier = (ROOT / "scripts/qualify-apple-silicon").read_text(encoding="utf-8")
+        self.assertIn('parser.add_argument("--image-digest", required=True)', qualifier)
+        self.assertNotIn("hashlib", qualifier)
 
     def test_fixture_registry_and_scan_targets_are_loopback_only(self):
         harness = (ROOT / "tests/integration/run_container_integration.py").read_text(encoding="utf-8")
         self.assertNotIn("example.com", harness)
         self.assertNotIn("scanme.nmap.org", harness)
         self.assertIn('"127.0.0.1"', harness)
-        self.assertIn('f"{fixture_host}:{port}/kali-mcp-fixture:latest"', harness)
+        self.assertIn('registry_ref = "127.0.0.1:5000/kali-mcp-fixture:latest"', harness)
         self.assertRegex(harness, r'REGISTRY_IMAGE = "registry:2\.8\.3@sha256:[a-f0-9]{64}"')
+
+    def test_harness_uses_launcher_and_an_isolated_container_network_namespace(self):
+        harness = (ROOT / "tests/integration/run_container_integration.py").read_text(encoding="utf-8")
+        self.assertIn("from kali_mcp_launcher import build_docker_command", harness)
+        self.assertIn('f"--network=container:{registry_name}"', harness)
+        self.assertIn('["docker", "network", "disconnect", "bridge", registry_name]', harness)
+        self.assertNotIn("class TcpFixture", harness)
+        self.assertNotRegex(harness, r"(?m)^\s*assert\s")
 
 
 if __name__ == "__main__":
