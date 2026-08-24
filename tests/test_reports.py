@@ -80,7 +80,7 @@ class ReportTests(unittest.TestCase):
                     "Tokens": "Basic dXNlcjpwYXNz ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890 xoxb-SLACKSECRET sk_live_STRIPESECRET glpat-GITLABSECRET",
                     "ObservedArtifact": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZWNyZXQifQ.JWT-SIGNATURE",
                     "Database": "mongodb://admin:DB-SECRET@example.test/app",
-                    "SignedUrls": "https://s3.example/object?X-Amz-Credential=AKIAEXAMPLE12345678&X-Amz-Signature=AWS-SIGNATURE https://blob.example/item?sv=1&sig=AZURE-SIGNATURE",
+                    "SignedUrls": "https://s3.example/object?X-Amz-Credential=AKIAEXAMPLE12345678&X-Amz-Signature=AWS-SIGNATURE https://blob.example/item?sv=1&sig=AZURE-SIGNATURE https://storage.example/item?X-Goog-Credential=scope&X-Goog-Signature=GOOGLE-SIGNATURE",
                     "Remediation": "Upgrade package",
                 },
                 {"VulnerabilityID": "CVE-TEST-2", "Severity": "HIGH"},
@@ -113,7 +113,7 @@ class ReportTests(unittest.TestCase):
                 self.assertIn(heading, report)
             for retained in ("demo&lt;&amp;", "CVE-TEST-1", "Upgrade package", "0.66.0", "2026-08-24"):
                 self.assertIn(retained, report)
-            for forbidden in ("<script", "REPORT-SECRET", "PEM-SECRET", "dXNlcjpwYXNz", "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", "SLACKSECRET", "STRIPESECRET", "GITLABSECRET", "JWT-SIGNATURE", "AWS-SIGNATURE", "AZURE-SIGNATURE", "DB-SECRET", "<img", "<iframe"):
+            for forbidden in ("<script", "REPORT-SECRET", "PEM-SECRET", "dXNlcjpwYXNz", "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", "SLACKSECRET", "STRIPESECRET", "GITLABSECRET", "JWT-SIGNATURE", "AWS-SIGNATURE", "AZURE-SIGNATURE", "GOOGLE-SIGNATURE", "DB-SECRET", "<img", "<iframe"):
                 self.assertNotIn(forbidden, report)
             self.assertNotIn("<script", report.lower())
             self.assertIn("Content-Security-Policy", report)
