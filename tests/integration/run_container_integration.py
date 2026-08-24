@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
-from contextlib import ExitStack
+from contextlib import contextmanager, ExitStack
 import gzip
 import hashlib
 import io
@@ -20,6 +20,10 @@ import tempfile
 import threading
 import time
 import tarfile
+from typing import NamedTuple
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
+from urllib.request import Request, urlopen
 import uuid
 import zipfile
 
@@ -68,8 +72,18 @@ def create_office_fixture(path: Path) -> None:
             archive.writestr(info, contents)
 
 
-def create_oci_archive(path: Path, platform_name: str) -> None:
-    """Create a minimal deterministic OCI archive without a registry or builder plugin."""
+class OciPayloads(NamedTuple):
+    config: bytes
+    config_digest: str
+    layer: bytes
+    layer_digest: str
+    manifest: bytes
+    manifest_digest: str
+    index: bytes
+
+
+def create_oci_payloads(platform_name: str) -> OciPayloads:
+    """Build deterministic OCI bytes shared by archive and registry fixtures."""
     architecture = platform_name.rsplit("/", 1)[1]
     layer_buffer = io.BytesIO()
     with tarfile.open(fileobj=layer_buffer, mode="w") as layer:
@@ -82,7 +96,7 @@ def create_oci_archive(path: Path, platform_name: str) -> None:
             info.size = len(data)
             info.mtime = 0
             layer.addfile(info, io.BytesIO(data))
-    compressed = gzip.compress(layer_buffer.getvalue(), mtime=0)
+    layer_bytes = gzip.compress(layer_buffer.getvalue(), mtime=0)
     config = json.dumps({
         "architecture": architecture, "os": "linux", "config": {},
         "rootfs": {"type": "layers", "diff_ids": [
@@ -98,7 +112,7 @@ def create_oci_archive(path: Path, platform_name: str) -> None:
         }
 
     config_descriptor = descriptor("application/vnd.oci.image.config.v1+json", config)
-    layer_descriptor = descriptor("application/vnd.oci.image.layer.v1.tar+gzip", compressed)
+    layer_descriptor = descriptor("application/vnd.oci.image.layer.v1.tar+gzip", layer_bytes)
     manifest = json.dumps({
         "schemaVersion": 2, "config": config_descriptor, "layers": [layer_descriptor]
     }, sort_keys=True, separators=(",", ":")).encode()
@@ -106,12 +120,26 @@ def create_oci_archive(path: Path, platform_name: str) -> None:
     manifest_descriptor["annotations"] = {"org.opencontainers.image.ref.name": "fixture:latest"}
     index = json.dumps({"schemaVersion": 2, "manifests": [manifest_descriptor]},
                        sort_keys=True, separators=(",", ":")).encode()
+    return OciPayloads(
+        config=config,
+        config_digest=config_descriptor["digest"],
+        layer=layer_bytes,
+        layer_digest=layer_descriptor["digest"],
+        manifest=manifest,
+        manifest_digest=manifest_descriptor["digest"],
+        index=index,
+    )
+
+
+def create_oci_archive(path: Path, platform_name: str) -> None:
+    """Create a minimal deterministic OCI archive without a registry or builder plugin."""
+    payloads = create_oci_payloads(platform_name)
     members = {
         "oci-layout": b'{"imageLayoutVersion":"1.0.0"}',
-        "index.json": index,
-        f"blobs/sha256/{config_descriptor['digest'].split(':')[1]}": config,
-        f"blobs/sha256/{layer_descriptor['digest'].split(':')[1]}": compressed,
-        f"blobs/sha256/{manifest_descriptor['digest'].split(':')[1]}": manifest,
+        "index.json": payloads.index,
+        f"blobs/sha256/{payloads.config_digest.split(':')[1]}": payloads.config,
+        f"blobs/sha256/{payloads.layer_digest.split(':')[1]}": payloads.layer,
+        f"blobs/sha256/{payloads.manifest_digest.split(':')[1]}": payloads.manifest,
     }
     with tarfile.open(path, "w") as archive:
         for name, payload in members.items():
@@ -119,6 +147,120 @@ def create_oci_archive(path: Path, platform_name: str) -> None:
             info.size = len(payload)
             info.mtime = 0
             archive.addfile(info, io.BytesIO(payload))
+
+
+def _origin(url: str) -> tuple[str, str, int | None]:
+    parsed = urlsplit(url)
+    return parsed.scheme, parsed.hostname or "", parsed.port
+
+
+def _request(url: str, method: str, *, data: bytes | None, headers: dict, timeout: float):
+    request = Request(url, data=data, headers=headers, method=method)
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            status = response.status
+            response_headers = response.headers
+            response.read()
+    except HTTPError as error:
+        error.read()
+        raise ValueError(f"registry {method} {url} returned HTTP {error.code}") from error
+    if not 200 <= status < 300:
+        raise ValueError(f"registry {method} {url} returned HTTP {status}")
+    return response_headers
+
+
+def _same_origin_location(endpoint: str, location: str) -> str:
+    resolved = urljoin(endpoint.rstrip("/") + "/", location)
+    if _origin(resolved) != _origin(endpoint):
+        raise ValueError(f"registry upload Location changed origin: {location!r}")
+    return resolved
+
+
+def _with_digest_query(url: str, digest: str) -> str:
+    parsed = urlsplit(url)
+    query = [(name, value) for name, value in parse_qsl(parsed.query, keep_blank_values=True)
+             if name != "digest"]
+    query.append(("digest", digest))
+    return urlunsplit(parsed._replace(query=urlencode(query)))
+
+
+def publish_oci_fixture(
+    endpoint: str,
+    payloads: OciPayloads,
+    *,
+    request_timeout: float = 2,
+    readiness_timeout: float = 15,
+) -> str:
+    """Seed a loopback registry through the host-side OCI Distribution API."""
+    parsed = urlsplit(endpoint)
+    if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or parsed.port is None:
+        raise ValueError("registry endpoint must be an explicit http://127.0.0.1:<port> origin")
+    deadline = time.monotonic() + readiness_timeout
+    while True:
+        try:
+            _request(f"{endpoint}/v2/", "GET", data=None, headers={}, timeout=request_timeout)
+            break
+        except (ValueError, URLError, TimeoutError, OSError) as error:
+            if time.monotonic() >= deadline:
+                raise ValueError(f"registry did not become ready at {endpoint}") from error
+            time.sleep(0.1)
+
+    upload_root = f"{endpoint}/v2/kali-mcp-fixture/blobs/uploads/"
+    for payload, digest in (
+        (payloads.config, payloads.config_digest),
+        (payloads.layer, payloads.layer_digest),
+    ):
+        headers = _request(
+            upload_root, "POST", data=b"", headers={"Content-Length": "0"}, timeout=request_timeout
+        )
+        location = headers.get("Location")
+        if not location:
+            raise ValueError("registry blob upload response omitted Location")
+        upload_url = _with_digest_query(_same_origin_location(endpoint, location), digest)
+        _request(
+            upload_url,
+            "PUT",
+            data=payload,
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=request_timeout,
+        )
+
+    manifest_url = f"{endpoint}/v2/kali-mcp-fixture/manifests/latest"
+    headers = _request(
+        manifest_url,
+        "PUT",
+        data=payloads.manifest,
+        headers={"Content-Type": "application/vnd.oci.image.manifest.v1+json"},
+        timeout=request_timeout,
+    )
+    remote_digest = headers.get("Docker-Content-Digest")
+    if remote_digest is None:
+        remote_digest = _request(
+            manifest_url,
+            "HEAD",
+            data=None,
+            headers={"Accept": "application/vnd.oci.image.manifest.v1+json"},
+            timeout=request_timeout,
+        ).get("Docker-Content-Digest")
+    if remote_digest != payloads.manifest_digest:
+        raise ValueError(
+            f"registry manifest digest mismatch: expected {payloads.manifest_digest}, got {remote_digest}"
+        )
+    return payloads.manifest_digest
+
+
+@contextmanager
+def temporary_fixture_image(platform_name: str, *, run_command=run):
+    """Build a fixture image and always remove its tag on scope exit."""
+    fixture_tag = f"kali-mcp-fixture:{uuid.uuid4().hex[:12]}"
+    run_command([
+        "docker", "build", "--platform", platform_name,
+        "-t", fixture_tag, str(FIXTURES / "image"),
+    ])
+    try:
+        yield fixture_tag
+    finally:
+        run_command(["docker", "image", "rm", "-f", fixture_tag], capture_output=True)
 
 
 class McpClient:
@@ -234,24 +376,12 @@ def with_entrypoint(command: list[str], entrypoint: str, entrypoint_args: list[s
     return command[:image_index] + ["--entrypoint", entrypoint, command[image_index]] + entrypoint_args
 
 
-def build_image_fixtures(
-    platform_name: str, artifacts: Path, registry_name: str
-) -> tuple[str, str, str]:
-    fixture_tag = f"kali-mcp-fixture:{uuid.uuid4().hex[:12]}"
-    run(["docker", "build", "--platform", platform_name, "-t", fixture_tag, str(FIXTURES / "image")])
+def create_image_archives(fixture_tag: str, platform_name: str, artifacts: Path) -> None:
+    """Write Docker and OCI archive fixtures from deterministic local inputs."""
     docker_archive = artifacts / "fixture-docker.tar"
     with docker_archive.open("wb") as output:
         subprocess.run(["docker", "save", fixture_tag], check=True, stdout=output)
-    oci_archive = artifacts / "fixture-oci.tar"
-    create_oci_archive(oci_archive, platform_name)
-    port = run(
-        ["docker", "port", registry_name, "5000/tcp"], capture_output=True
-    ).stdout.strip().rsplit(":", 1)[1]
-    local_push_ref = f"127.0.0.1:{port}/kali-mcp-fixture:latest"
-    run(["docker", "tag", fixture_tag, local_push_ref])
-    run(["docker", "push", local_push_ref])
-    registry_ref = "127.0.0.1:5000/kali-mcp-fixture:latest"
-    return fixture_tag, local_push_ref, registry_ref
+    create_oci_archive(artifacts / "fixture-oci.tar", platform_name)
 
 
 def require(condition: bool, message: str) -> None:
@@ -299,13 +429,15 @@ def main() -> int:
         stack.callback(lambda: subprocess.run(
             ["docker", "rm", "-f", registry_name], capture_output=True, text=True
         ))
-        fixture_tag, local_push_ref, registry_ref = build_image_fixtures(
-            args.platform, artifacts, registry_name
-        )
-        stack.callback(lambda: subprocess.run(
-            ["docker", "image", "rm", "-f", fixture_tag, local_push_ref],
-            capture_output=True, text=True,
-        ))
+        fixture_tag = stack.enter_context(temporary_fixture_image(args.platform))
+        create_image_archives(fixture_tag, args.platform, artifacts)
+        port = run(
+            ["docker", "port", registry_name, "5000/tcp"], capture_output=True
+        ).stdout.strip().rsplit(":", 1)[1]
+        endpoint = f"http://127.0.0.1:{port}"
+        payloads = create_oci_payloads(args.platform)
+        publish_oci_fixture(endpoint, payloads)
+        registry_ref = "127.0.0.1:5000/kali-mcp-fixture:latest"
         run(["docker", "network", "disconnect", "bridge", registry_name])
 
         base = docker_runtime_args(args, workspace, artifacts, results, reports, registry_name)
