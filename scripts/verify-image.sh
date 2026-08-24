@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-lock_files="${*:-/tmp/packages.lock /tmp/source-packages.lock}"
+lock_files="${*:-/usr/local/share/kali-mcp/packages.lock /usr/local/share/kali-mcp/source-packages.lock}"
 
 if [ "$(id -u)" -eq 0 ]; then
     echo "image must run as a non-root user" >&2

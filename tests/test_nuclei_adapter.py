@@ -206,6 +206,10 @@ class NucleiAdapterTests(unittest.TestCase):
         )
         self.assertIn('manifest_path = root / "manifest.json"', verifier)
         self.assertIn("hashlib.sha256", verifier)
+        self.assertIn(
+            "/usr/local/share/kali-mcp/packages.lock /usr/local/share/kali-mcp/source-packages.lock",
+            verifier,
+        )
 
 
 if __name__ == "__main__":
