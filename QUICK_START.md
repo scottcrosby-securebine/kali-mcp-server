@@ -1,348 +1,74 @@
-# Kali MCP Server - Quick Start Guide
+# Quick start
 
-Get your Kali MCP Server running in **5 minutes or less**.
+This path uses the repository launcher so the container receives the required security, network, and mount policy.
 
----
+## 1. Build
 
-## ⚡ Prerequisites
-
-Before you begin, ensure you have:
-
-- **Docker Desktop** installed ([Download here](https://www.docker.com/products/docker-desktop))
-- **OR** Python 3.10+ and pip for local deployment
-- **MCP-capable client** (Claude Desktop, Warp Terminal, or another MCP client)
-- **Network access** to download dependencies
-- **~3GB disk space** for the Docker image
-
----
-
-## 🚀 Three Simple Steps
-
-### Step 1: Get the Code
+Install Docker, clone the repository, then build the pinned image:
 
 ```bash
 git clone https://github.com/scottcrosby-securebine/kali-mcp-server.git
 cd kali-mcp-server
-```
-
-### Step 2: Build the Docker Image
-
-```bash
 docker build -t kali-mcp-server:latest .
 ```
 
-⏱️ **Build time:** 15-30 minutes (downloads Kali packages and compiles Go tools)
+The supported launcher hosts are Linux amd64/arm64 and Apple Silicon. Intel macOS and Windows are not supported by the launcher. Physical Apple Silicon qualification is pending; QEMU Linux/arm64 CI is green but is not a macOS result.
 
-### Step 3: Configure Your MCP Client
-
-The server communicates via stdio (standard input/output), so your MCP client needs to spawn it with the correct command.
-
----
-
-## 📱 Client Configuration Examples
-
-### Option A: Claude Desktop
-
-**macOS Config Location:**  
-`~/Library/Application Support/Claude/claude_desktop_config.json`
-
-**Windows Config Location:**  
-`%APPDATA%\Claude\claude_desktop_config.json`
-
-**Configuration:**
-```json
-{
-  "mcpServers": {
-    "kali-mcp-server": {
-      "command": "docker",
-      "args": [
-        "run",
-        "-i",
-        "--rm",
-        "--security-opt",
-        "no-new-privileges",
-        "kali-mcp-server:latest"
-      ],
-      "env": {
-        "PYTHONUNBUFFERED": "1"
-      }
-    }
-  }
-}
-```
-
-**Restart Claude Desktop** after saving the configuration.
-
----
-
-### Option B: Docker MCP Gateway (Warp Terminal) - **RECOMMENDED**
-
-**⭐ For AI-assisted security testing**, see the comprehensive [**Warp AI Terminal Guide**](docs/WARP_TERMINAL_GUIDE.md) - includes beginner-friendly setup, AI prompts, troubleshooting, and best practices.
-
-If using Docker Desktop's MCP Gateway integration:
-
-1. **Enable MCP** in Docker Desktop Settings
-2. **Register the server** (see SETUP_DOCKER_MCP.md for details)
-3. **Connect from Warp Terminal** (see [Warp AI Terminal Guide](docs/WARP_TERMINAL_GUIDE.md) for complete walkthrough)
-
-Quick registration entry:
-```json
-{
-  "servers": {
-    "kali-mcp-server": {
-      "type": "stdio",
-      "command": "docker",
-      "args": ["run", "-i", "--rm", "--security-opt", "no-new-privileges", "kali-mcp-server:latest"]
-    }
-  }
-}
-```
-
----
-
-### Option C: Local Python Deployment
-
-If you prefer running without Docker:
+## 2. Prepare optional mounts
 
 ```bash
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the server
-python3 kali_pentest_server.py
+mkdir -p workspace artifacts results reports secrets
 ```
 
-**MCP Client Configuration (local mode):**
-```json
-{
-  "mcpServers": {
-    "kali-mcp-server": {
-      "command": "python3",
-      "args": ["/absolute/path/to/kali_pentest_server.py"],
-      "env": {
-        "PYTHONUNBUFFERED": "1"
-      }
-    }
-  }
-}
-```
+- Put project files, SBOMs, and OCI directories in `workspace`.
+- Put Docker/OCI archives and Office files in `artifacts`.
+- `results` and `reports` persist generated output.
+- Put explicitly required secret files in `secrets`; authenticated workflows are not yet supported.
 
-⚠️ **Important:** Use absolute paths, not `~` or relative paths.
+Input mounts are read-only. Output mounts are writable. Omit `results` or `reports` to use non-persistent container tmpfs instead.
 
----
-
-## ✅ Verify Installation
-
-### Test in Claude Desktop
-
-1. Open Claude Desktop
-2. Look for the 🔌 (plug) icon or MCP status indicator
-3. Verify "kali-mcp-server" appears in the available tools list
-
-**Ask Claude:**
-```
-"List all available tools from kali-mcp-server"
-```
-
-You should see 42 security testing tools listed.
-
-### Test Basic Commands
-
-Try these simple requests:
-
-**Network Scanning:**
-```
-"Use nmap to scan 192.168.1.100 for open ports"
-"Perform a quick reconnaissance on example.com"
-```
-
-**Information Gathering:**
-```
-"Get WHOIS information for github.com"
-"Search searchsploit for Apache vulnerabilities"
-```
-
-**DNS Enumeration:**
-```
-"Enumerate DNS records for example.com"
-"Discover subdomains of example.com using subfinder"
-```
-
----
-
-## 🎯 Available Tool Categories
-
-Your server includes **42 tools** across 8 categories:
-
-| Category | Tools | Example Use |
-|----------|-------|-------------|
-| **Network Recon** | 11 tools | `nmap_scan`, `dns_enum`, `subfinder_scan` |
-| **Web Testing** | 11 tools | `nikto_scan`, `sqlmap_scan`, `wpscan_scan` |
-| **SSL/TLS** | 3 tools | `sslscan_scan`, `testssl_scan`, `sslyze_scan` |
-| **SMB/Windows** | 5 tools | `enum4linux_scan`, `crackmapexec_scan` |
-| **Password Testing** | 3 tools | `hydra_attack`, `john_crack`, `hashcat_crack` |
-| **Vuln Research** | 3 tools | `searchsploit_search`, `metasploit_search` |
-| **OSINT** | 2 tools | `theharvester_scan`, `whois_lookup` |
-| **Combined Ops** | 4 tools | `quick_recon`, `full_recon`, `web_audit` |
-
----
-
-## 🐛 Quick Troubleshooting
-
-### Server Not Starting
-
-**Problem:** Container exits immediately or shows errors.
-
-**Solution:**
-```bash
-# Run interactively to see logs
-docker run -it --rm kali-mcp-server:latest
-
-# Check for error messages
-# Common issues: missing dependencies, port conflicts
-```
-
----
-
-### Client Can't Connect
-
-**Problem:** MCP client doesn't show the server or tools.
-
-**Solutions:**
-1. **Use absolute paths** in configuration (not `~` or relative paths)
-2. **Restart your MCP client** completely (quit and reopen)
-3. **Check config file syntax** - ensure valid JSON (use a validator)
-4. **View client logs:**
-   - Claude Desktop: Help → View Logs
-   - Check for connection errors or spawn failures
-
----
-
-### Permission Errors
-
-**Problem:** "Operation not permitted" errors during scans.
-
-**Solution:**  
-This is expected for certain operations. The server uses `-Pn` flags with nmap to avoid raw socket operations. All scans work within Docker's security constraints.
-
-If you see permission errors:
-- ✅ **Normal:** ICMP ping operations (nmap uses `-Pn` to skip these)
-- ❌ **Problem:** File system or network errors (check Docker settings)
-
----
-
-### No Output from Tools
-
-**Problem:** Tool executes but returns no results.
-
-**Common Causes:**
-1. **Target unreachable** - Verify network connectivity
-2. **Firewall blocking** - Check target allows your IP
-3. **Invalid target format** - Use correct format (IPs, domains, URLs)
-
-**Debug:**
-```bash
-# Test Docker networking
-docker run -it --rm kali-mcp-server:latest ping -c 3 8.8.8.8
-
-# Test tool directly
-docker run -it --rm kali-mcp-server:latest nmap -sT -Pn -F scanme.nmap.org
-```
-
----
-
-### Rebuild After Updates
-
-**Problem:** Code changes or Dockerfile updates not reflected.
-
-**Solution:**
-```bash
-# Force rebuild without cache
-docker build --no-cache -t kali-mcp-server:latest .
-
-# Remove old images (optional)
-docker image prune
-```
-
----
-
-## 📚 Next Steps
-
-Now that your server is running:
-
-1. **Read the full documentation:**
-   - 🤖 **[Warp AI Terminal Guide](docs/WARP_TERMINAL_GUIDE.md)** - **RECOMMENDED**: Complete AI-assisted security testing guide with Docker MCP Gateway
-   - [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - Comprehensive deployment options
-   - [SETUP_DOCKER_MCP.md](SETUP_DOCKER_MCP.md) - Docker MCP Gateway configuration details
-   - [README.md](README.md) - Complete tool reference
-
-2. **Practice on authorized targets:**
-   - Use your own lab environment
-   - Try vulnerable testing sites (e.g., testphp.vulnweb.com)
-   - **Never** test unauthorized systems
-
-3. **Explore advanced features:**
-   - Combined operations (multi-tool workflows)
-   - Custom scan profiles
-   - Integration with your pentesting workflow
-
----
-
-## ⚠️ Legal & Security Reminder
-
-**Before using any tool:**
-
-- ✅ **ONLY** test systems you own
-- ✅ **GET WRITTEN PERMISSION** for any external testing
-- ✅ **COMPLY** with all applicable laws and regulations
-- ✅ **DOCUMENT** your authorization
-
-**Unauthorized computer access is illegal and may result in criminal prosecution.**
-
-See [LICENSE](LICENSE) for terms and conditions.
-
----
-
-## 🆘 Getting Help
-
-- **Issues:** Report bugs via [GitHub Issues](https://github.com/scottcrosby-securebine/kali-mcp-server/issues)
-- **Documentation:** Check README.md and deployment guides
-- **Community:** Join discussions for tips and best practices
-
----
-
-## 🎉 Success!
-
-You now have a fully functional Kali MCP Server providing **42 professional security testing tools** through an AI-friendly interface.
-
-**Happy (authorized) hacking!** 🎯🔒
-
----
-
-**Quick Reference Card:**
+## 3. Inspect and run
 
 ```bash
-# Build
-docker build -t kali-mcp-server:latest .
-
-# Test
-docker run -it --rm kali-mcp-server:latest
-
-# Configure client
-Edit MCP client config with stdio command
-
-# Verify
-Ask: "List available tools from kali-mcp-server"
-
-# Use
-Ask: "Scan 192.168.1.100 with nmap"
+scripts/kali-mcp \
+  --image kali-mcp-server:latest \
+  --workspace "$PWD/workspace" \
+  --artifacts "$PWD/artifacts" \
+  --results "$PWD/results" \
+  --reports "$PWD/reports" \
+  --secrets "$PWD/secrets" \
+  --dry-run
 ```
 
----
+Remove `--dry-run` when the command is connected to an MCP client. Linux defaults to `linux-full`; Apple Silicon defaults to `mac-hardened`. Select Linux bridge isolation explicitly with `--profile linux-hardened`.
 
-*Generated: October 2025*  
-*Version: v2.0.0-release-prep*
+See [MCP client integration](SETUP_DOCKER_MCP.md) for configuring a client to invoke this command.
+
+## 4. First local workflows
+
+Use only authorized targets and inputs.
+
+- Project SBOM: call `syft_sbom` with `target_ref="."`, `source_type="dir"`.
+- Project vulnerabilities: call `trivy_scan` with `target_ref="."`, `source_type="filesystem"`.
+- Archive SBOM: place `image.tar` in `artifacts`, then call `syft_sbom` with `target_ref="image.tar"`, `source_type="docker-archive"`.
+- Office analysis: place a document in `artifacts`, then call `oletools_scan` with its relative path.
+- Report: copy the opaque ID from a successful scanner response into `generate_report`.
+
+Generated JSON appears under `results`; generated HTML appears under `reports` when those mounts are present.
+
+## Troubleshooting
+
+```bash
+scripts/kali-mcp --help
+scripts/kali-mcp --image kali-mcp-server:latest --dry-run
+python3 -m unittest discover -s tests -v
+```
+
+- `unsupported_platform`: use Linux amd64/arm64 or Apple Silicon.
+- `unavailable`: the requested profile does not match the host.
+- `invalid_mount`: ensure the directory exists, does not overlap another mount role, and contains no Unix socket.
+- `prohibited_socket`: remove sockets and socket aliases from the mounted tree.
+- Scanner path errors: use a relative path beneath the appropriate mount, not `/tmp`, an absolute host path, or `..`.
+- `capability_missing`: the requested raw/link-layer operation is intentionally unavailable.
+
+For the complete source matrix and report behavior, use the [deployment guide](DEPLOYMENT_GUIDE.md).

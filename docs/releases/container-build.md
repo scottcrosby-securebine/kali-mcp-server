@@ -19,6 +19,12 @@ installed-package inventory as workflow artifacts. A published image digest,
 not a future rebuild against the moving Kali repository, is the durable release
 identity.
 
+The `linux/arm64` workflow runs through QEMU on a Linux runner. It proves the
+arm64 image build, verifier, MCP discovery, and hermetic integration behavior;
+it does not prove Docker Desktop behavior on Apple hardware. Physical
+Darwin/arm64 qualification remains pending and must complete before current
+macOS instructions are described as qualified.
+
 The current local-load workflow does not publish an image, SBOM, or signed
 provenance attestation. Publishing and those release artifacts remain a release
 qualification step; this limitation must remain visible until that step exists.

@@ -1,3 +1,5 @@
+> **HISTORICAL / ARCHIVED:** This dated implementation note does not describe the current server. Use [README.md](README.md), [QUICK_START.md](QUICK_START.md), and [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for current behavior.
+
 # Implementation Notes - New MCP Tools
 **Date:** October 12, 2025  
 **Changes Applied To:** `kali_pentest_server.py`

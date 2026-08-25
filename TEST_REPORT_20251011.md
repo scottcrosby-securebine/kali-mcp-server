@@ -1,3 +1,5 @@
+> **HISTORICAL / ARCHIVED:** This 2025 report is not current release evidence and its target findings must not be treated as present-day facts. Use the repository test suite, container CI, and [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for current evidence and behavior.
+
 # Kali MCP Server Nmap Tools - Comprehensive Test Report
 **Test Date:** October 11, 2025  
 **Test Target:** example.com (192.168.1.100)  

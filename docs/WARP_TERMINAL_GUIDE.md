@@ -1,3 +1,5 @@
+> **HISTORICAL / ARCHIVED:** This client-specific guide contains obsolete Docker MCP Gateway setup details and unsupported qualification claims. Use the current [quick start](../QUICK_START.md), [operator guide](../DEPLOYMENT_GUIDE.md), and [client integration note](../SETUP_DOCKER_MCP.md).
+
 # Warp Terminal Guide for Kali MCP Server
 
 **Using Docker MCP Gateway with Warp AI - A Complete Guide for Security Engineers**

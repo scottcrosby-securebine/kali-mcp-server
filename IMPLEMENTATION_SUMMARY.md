@@ -1,3 +1,5 @@
+> **HISTORICAL / ARCHIVED:** This point-in-time summary contains obsolete tool, build, and qualification claims. Use [README.md](README.md), [QUICK_START.md](QUICK_START.md), and [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for current behavior.
+
 # 🎉 Kali MCP Server v2 - Implementation Complete!
 
 ## ✅ What Was Built
