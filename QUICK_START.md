@@ -17,13 +17,20 @@ The supported launcher hosts are Linux amd64/arm64 and Apple Silicon. Intel macO
 ## 2. Prepare optional mounts
 
 ```bash
-mkdir -p workspace artifacts results reports secrets
+mkdir -p workspace artifacts results reports
 ```
 
 - Put project files, SBOMs, and OCI directories in `workspace`.
 - Put Docker/OCI archives and Office files in `artifacts`.
 - `results` and `reports` persist generated output.
-- Put explicitly required secret files in `secrets`; authenticated workflows are not yet supported.
+
+On Linux, the persisted output directories must be writable by container UID 1000. Prefer assigning those two directories to UID 1000 or granting that UID a narrow ACL; do not make them world-writable. For example, when you own the directories and accept changing their ownership:
+
+```bash
+sudo chown 1000:1000 results reports
+```
+
+The optional `--secrets` mount is reserved for explicit read-only secret files. Authenticated workflows do not consume it yet.
 
 Input mounts are read-only. Output mounts are writable. Omit `results` or `reports` to use non-persistent container tmpfs instead.
 
@@ -36,7 +43,6 @@ scripts/kali-mcp \
   --artifacts "$PWD/artifacts" \
   --results "$PWD/results" \
   --reports "$PWD/reports" \
-  --secrets "$PWD/secrets" \
   --dry-run
 ```
 
@@ -56,6 +62,8 @@ Use only authorized targets and inputs.
 
 Generated JSON appears under `results`; generated HTML appears under `reports` when those mounts are present.
 
+Trivy may need its vulnerability database. Under a deliberately isolated/no-egress network it can return a controlled database-unavailable failure and create no result; that is distinct from a mount error.
+
 ## Troubleshooting
 
 ```bash
@@ -67,6 +75,7 @@ python3 -m unittest discover -s tests -v
 - `unsupported_platform`: use Linux amd64/arm64 or Apple Silicon.
 - `unavailable`: the requested profile does not match the host.
 - `invalid_mount`: ensure the directory exists, does not overlap another mount role, and contains no Unix socket.
+- Output write errors: ensure `results` and `reports` are writable by container UID 1000.
 - `prohibited_socket`: remove sockets and socket aliases from the mounted tree.
 - Scanner path errors: use a relative path beneath the appropriate mount, not `/tmp`, an absolute host path, or `..`.
 - `capability_missing`: the requested raw/link-layer operation is intentionally unavailable.

@@ -18,12 +18,21 @@ scripts/kali-mcp --image kali-mcp-server:latest --dry-run
 # Host startup is only a development convenience
 python3 kali_pentest_server.py          # host: needs `pip install -r requirements.txt` + the Kali tools on PATH
 
-# Run the native contract, adapter, report, launcher, and documentation tests
+# Run the native contract, adapter, report, launcher, registry, and browser tests
 python3 -m unittest discover -s tests -v
 
 # Verify a built image under the required NNP boundary
 docker run --rm --security-opt=no-new-privileges \
   --entrypoint verify-kali-mcp-image kali-mcp-server:latest
+
+# Exercise the real MCP/container seam after building the requested platform image
+python3 tests/integration/run_container_integration.py \
+  --image kali-mcp-server:latest --platform linux/amd64
+
+# Stage an explicitly reviewed, detection-only Nuclei template set
+scripts/update-nuclei-templates --source /path/to/upstream \
+  --destination /new/staging/directory --version UPSTREAM_VERSION \
+  http/cves/example.yaml
 ```
 
 Container CI builds `linux/amd64` and `linux/arm64`, runs the image verifier, and exercises the hermetic MCP/container integration seam. QEMU arm64 CI is not physical Apple Silicon qualification; do not publish a claim that Docker Desktop qualification is complete until real Darwin/arm64 evidence exists. `python3 kali_pentest_server.py` on the host needs the Python dependencies plus the Kali binaries on `PATH`; the container is the reliable environment.
@@ -50,7 +59,9 @@ Shared helpers in `kali_pentest_server.py` carry the cross-tool logic:
 - `sanitize_input(s)` — `shlex.quote` wrapper. Present but rarely needed: because commands are passed as arg lists, shell metacharacters are already inert. Don't add `shell=True` and then reason about quoting — keep the list form.
 - `capability_missing(operation, capability)` — stable readable response for an operation the active Docker profile cannot support. Return this before calling `run_command`.
 
-Combined-operation tools (`quick_recon`, `full_recon`, `web_audit`, `network_sweep`) don't spawn subprocesses directly — they `await` the other tool functions and concatenate the formatted output. Timeouts are tiered constants (`TIMEOUT_SHORT`=60s … `TIMEOUT_EXTRA_LONG`=1800s); pick the tier by expected scan length.
+Combined-operation tools (`quick_recon`, `full_recon`, `web_audit`, `network_sweep`) don't spawn subprocesses directly — they `await` the other tool functions and concatenate the formatted output. `full_recon` and `web_audit` also classify stage status and persist one report for successful or partial execution. Timeouts are tiered constants (`TIMEOUT_SHORT`=60s … `TIMEOUT_EXTRA_LONG`=1800s); pick the tier by expected scan length.
+
+Template promotion is a controlled maintainer operation. It requires an existing source root, a fresh destination, an upstream version, and explicitly reviewed relative template paths; unsafe features and mutating request methods are rejected. Review the staged manifest before replacing the repository set.
 
 Server entrypoint runs `mcp.run(transport='stdio')`. The tool's single-line docstring **is** the description the AI client sees, so keep it accurate and one line.
 

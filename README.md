@@ -1,6 +1,6 @@
 # Kali MCP Server
 
-An MCP stdio server that preserves 42 Kali security calls and adds four bounded local scanning and reporting calls. The supported runtime is the repository's Docker image launched through `scripts/kali-mcp` on Linux amd64/arm64 or Apple Silicon.
+An MCP stdio server that preserves 42 Kali security calls and adds four bounded scanning and local-reporting calls. The supported runtime is the repository's Docker image launched through `scripts/kali-mcp` on Linux amd64/arm64 or Apple Silicon.
 
 Use this software only on systems and data you own or are explicitly authorized to assess.
 
@@ -58,6 +58,8 @@ docker build -t kali-mcp-server:latest .
 docker run --rm --security-opt=no-new-privileges \
   --entrypoint verify-kali-mcp-image kali-mcp-server:latest
 ```
+
+The direct `docker run` command is a build verifier only. Use `scripts/kali-mcp` for the MCP runtime so the full security and mount policy is applied.
 
 Container CI builds and runs the verifier and hermetic integration gate for `linux/amd64` and `linux/arm64`. See [CLAUDE.md](CLAUDE.md) for contributor invariants.
 

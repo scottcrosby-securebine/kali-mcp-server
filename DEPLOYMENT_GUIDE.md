@@ -12,9 +12,11 @@ docker run --rm --security-opt=no-new-privileges \
   --entrypoint verify-kali-mcp-image kali-mcp-server:latest
 ```
 
-The base image, Kali packages, source packages, Python packages, and promoted Nuclei templates are pinned. A later rebuild against Kali rolling is not guaranteed to reproduce a published image; the published manifest digest is the release identity.
+That direct `docker run` invocation verifies the built image only. It is not an MCP runtime command; use `scripts/kali-mcp` for the full runtime policy.
 
-CI verifies both Linux architectures with QEMU. Physical Apple Silicon Docker Desktop qualification is pending, so macOS instructions are provisional rather than a completed qualification claim.
+The base image, Kali packages, source packages, Python packages, and promoted Nuclei templates are pinned. A later rebuild against Kali rolling is not guaranteed to reproduce a release image; when an image is published, its manifest digest is the release identity. The current workflow does not publish an image.
+
+CI verifies both Linux architectures; the arm64 leg runs through QEMU. Physical Apple Silicon Docker Desktop qualification is pending, so macOS instructions are provisional rather than a completed qualification claim.
 
 ## Launcher profiles
 
@@ -42,7 +44,15 @@ Nmap uses unprivileged TCP connect scans and skips raw host discovery. SYN scans
 
 If `results` or `reports` is omitted, the launcher creates non-persistent tmpfs for that root. Persist output by providing separate existing host directories.
 
+Persisted output directories must be writable by container UID 1000. On Linux, set ownership or a narrow ACL for that UID; do not default to world-writable directories. For operator-owned directories where changing ownership is acceptable:
+
+```bash
+sudo chown 1000:1000 results reports
+```
+
 Mount roles must not alias, nest, or overlap. Resolved paths containing commas, missing/non-directory paths, Unix sockets, and symlinks to sockets are rejected. Scanner paths must remain beneath the selected root after symlink resolution. Absolute paths, `..` escapes, and sibling-prefix tricks fail before command execution.
+
+The added scanners accept mount-relative references. Legacy direct-only password calls instead need container-visible file paths such as `/workspace/hashes.txt` or `/workspace/wordlist.txt`.
 
 Example:
 
@@ -75,15 +85,19 @@ Place archives beneath `/artifacts`.
 
 Both Trivy and Syft accept `source_type="registry"` with an explicit image reference. References must be credential-free and cannot contain a URL scheme or user information. Private-registry authentication is not supported.
 
+Example public reference: call `syft_sbom` with `target_ref="registry.example/authorized/image:tag"`, `source_type="registry"`, and `format="cyclonedx-json"`. Replace it only with a public image you are authorized to inspect.
+
 ### Office artifact
 
-`oletools_scan` accepts one bounded regular file beneath `/artifacts`. Choose `analyzer="olevba"` or `analyzer="msodde"`. Macro source is not persisted; normalized findings are redacted before storage.
+`oletools_scan` accepts one regular file of at most 25 MiB beneath `/artifacts`. Choose `analyzer="olevba"` or `analyzer="msodde"`. An invalid or oversized artifact is rejected before execution and creates no result. Macro source is not persisted; normalized findings are redacted before storage.
 
 ### Website CVE scan
 
-`nuclei_scan` uses only reviewed templates promoted in `nuclei-templates/manifest.json`. Template IDs/paths and severities are validated. Rate, concurrency, and timeout ceilings are fixed; OAST, cloud upload, update checks, code, JavaScript, headless, file, fuzz/DAST, and workflow template types are disabled. Ordinary scans never update templates.
+`nuclei_scan` uses only reviewed templates promoted in `nuclei-templates/manifest.json`. An empty `templates` value selects the promoted root; explicit template IDs or relative paths must resolve beneath that root. Default severities are `critical,high`; accepted unique values are `info`, `low`, `medium`, `high`, and `critical`. The fixed ceilings are 10 requests per second, concurrency 5, and 600 seconds. OAST, cloud upload, update checks, code, JavaScript, headless, file, fuzz/DAST, and workflow template types are disabled. Ordinary scans never update templates.
 
 `web_audit` includes bounded Nuclei observations in its returned summary while retaining the complete redacted finding set for its report.
+
+For a direct authorized website-CVE check, call `nuclei_scan` with a local or explicitly authorized HTTP(S) target and optional promoted template IDs and severities. For example: `target="http://127.0.0.1:8080"`, `templates="CVE-2021-41773"`, `severity="high,critical"`.
 
 ### Result and report lifecycle
 
@@ -91,7 +105,7 @@ Successful Trivy, Syft, and oletools calls write one normalized JSON document to
 
 Pass the exact opaque ID to `generate_report(result_ref, format="html")`. It accepts supported normalized results only and creates a non-overwriting HTML file beneath `/reports`. Reports are self-contained, scriptless, escaped and redacted; browser acceptance tests verify that rendering makes zero network requests.
 
-`full_recon` and `web_audit` write exactly one workflow report after successful or partial execution and return a bounded summary plus `report=/reports/<id>.html`. If every attempted check fails, they return a failure string and write no report.
+`full_recon` and `web_audit` write exactly one workflow report after successful or partial execution and return their text summary plus `report=/reports/<id>.html`. The `web_audit` summary is bounded to 200 lines; `full_recon` retains its legacy concatenated output. If every attempted check fails, they return a failure string and write no report.
 
 Supported Syft formats are `cyclonedx-json`, `spdx-json`, and `syft-json`. HTML is the only report format.
 
@@ -118,6 +132,7 @@ This rule prevents automatic escalation from reconnaissance into credential test
 | `unavailable` | Profile is not allowed on this host | Use the host default or an allowed profile |
 | `invalid_mount` | Mount is missing, malformed, overlapping, or uninspectable | Supply separate existing directories |
 | `prohibited_socket` | A mount would expose a Unix socket | Remove the socket or choose another tree |
+| output write error | `/results` or `/reports` is not writable by UID 1000 | Correct ownership or grant a narrow ACL |
 | `capability_missing` | Operation requires intentionally unavailable raw/link-layer behavior | Use a supported TCP-connect operation |
 | scanner `Error` | Invalid source, confined path, process failure, timeout, or malformed output | Correct input; no result is created on failure |
 
