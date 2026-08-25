@@ -1,8 +1,12 @@
+import io
 import os
 import socket
+import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import kali_mcp_launcher as launcher
 
@@ -135,6 +139,27 @@ class DockerArgumentTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_rosetta_process_selects_the_apple_silicon_profile(self):
+        output = io.StringIO()
+        errors = io.StringIO()
+        translated = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="1\n", stderr=""
+        )
+        with (
+            patch.object(launcher.platform, "system", return_value="Darwin"),
+            patch.object(launcher.platform, "machine", return_value="x86_64"),
+            patch("subprocess.run", return_value=translated),
+            redirect_stdout(output),
+            redirect_stderr(errors),
+        ):
+            result = launcher.main(
+                ["--dry-run", "--image", "kali-mcp-server:test"],
+                exec_command=lambda _args: self.fail("dry-run executed Docker"),
+            )
+        self.assertEqual(0, result)
+        self.assertEqual("", errors.getvalue())
+        self.assertIn("KALI_MCP_PROFILE=mac-hardened", output.getvalue())
+
     def test_dry_run_does_not_execute_docker(self):
         result = launcher.main(
             ["--dry-run", "--image", "kali-mcp-server:test"],

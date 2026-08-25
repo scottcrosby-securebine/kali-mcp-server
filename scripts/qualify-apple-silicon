@@ -6,11 +6,88 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
-import platform
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+from kali_mcp_launcher import LauncherError, detect_current_host
+
+
+def docker_desktop_details() -> dict[str, str]:
+    """Require a local arm64 Docker Desktop daemon and return evidence fields."""
+    if any(os.environ.get(name) for name in ("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG")):
+        raise ValueError("Apple Silicon qualification requires local Docker Desktop")
+    expected_endpoint = f"unix://{Path.home() / '.docker/run/docker.sock'}"
+    try:
+        desktop = json.loads(subprocess.run(
+            ["docker", "desktop", "status", "--format", "json"],
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout)
+        offload = json.loads(subprocess.run(
+            ["docker", "offload", "status", "--format", "json"],
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout)
+        context = subprocess.run(
+            ["docker", "context", "show"], check=True, text=True, capture_output=True
+        ).stdout.strip()
+        descriptors = json.loads(subprocess.run(
+            ["docker", "context", "inspect", context],
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout)
+        info = json.loads(subprocess.run(
+            ["docker", "info", "--format", "{{json .}}"],
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout)
+        descriptor = descriptors[0]
+        endpoint = descriptor["Endpoints"]["docker"]["Host"]
+        description = descriptor["Metadata"]["Description"]
+        architecture = {"aarch64": "arm64"}.get(info["Architecture"], info["Architecture"])
+        docker_version = info["ServerVersion"]
+        docker_daemon_id = info["ID"]
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, IndexError, KeyError, TypeError) as error:
+        raise ValueError("Apple Silicon qualification requires local Docker Desktop") from error
+    if (
+        not isinstance(desktop, dict)
+        or desktop.get("Status") != "running"
+        or not isinstance(offload, dict)
+        or offload.get("status") != "STATUS_STOPPED"
+        or offload.get("engineStatus") != "ENGINE_STATUS_STOPPED"
+        or offload.get("accountName") != ""
+        or offload.get("engineWorkerID") != ""
+        or context != "desktop-linux"
+        or description != "Docker Desktop"
+        or endpoint != expected_endpoint
+        or info.get("OperatingSystem") != "Docker Desktop"
+        or architecture != "arm64"
+        or not isinstance(docker_version, str)
+        or not docker_version
+        or not isinstance(docker_daemon_id, str)
+        or not docker_daemon_id
+    ):
+        raise ValueError("Apple Silicon qualification requires local Docker Desktop on arm64")
+    return {
+        "docker_version": docker_version,
+        "docker_daemon_id": docker_daemon_id,
+        "docker_offload": "stopped-unconfigured",
+        "docker_platform": "Docker Desktop",
+        "docker_architecture": architecture,
+        "docker_context": context,
+        "docker_endpoint": endpoint,
+    }
 
 
 def validate_image_reference(image: str, digest: str) -> str:
@@ -29,41 +106,79 @@ def main() -> int:
     parser.add_argument("--evidence", required=True, type=Path)
     args = parser.parse_args()
 
-    if platform.system() != "Darwin" or platform.machine().lower() not in {"arm64", "aarch64"}:
+    try:
+        host = detect_current_host()
+    except LauncherError:
+        parser.error("Apple Silicon qualification must run on a Darwin/arm64 host")
+    if host.system != "darwin" or host.architecture != "arm64":
         parser.error("Apple Silicon qualification must run on a Darwin/arm64 host")
     try:
         validate_image_reference(args.image, args.image_digest)
     except ValueError as error:
         parser.error(str(error))
+    try:
+        docker_details = docker_desktop_details()
+    except ValueError as error:
+        parser.error(str(error))
 
-    repo = Path(__file__).resolve().parent.parent
+    docker_env = os.environ.copy()
+    docker_env.pop("DOCKER_CONTEXT", None)
+    docker_env.pop("DOCKER_CONFIG", None)
+    docker_env["DOCKER_HOST"] = docker_details["docker_endpoint"]
+
     command = [
         sys.executable,
-        str(repo / "tests/integration/run_container_integration.py"),
+        str(REPO / "tests/integration/run_container_integration.py"),
         "--image", args.image,
         "--platform", "linux/arm64",
         "--profile", "mac-hardened",
     ]
-    completed = subprocess.run(command, text=True, capture_output=True)
+    completed = subprocess.run(command, text=True, capture_output=True, env=docker_env)
     inspect = subprocess.run(
         ["docker", "image", "inspect", "--format", "{{.Id}}", args.image],
         check=True,
         text=True,
         capture_output=True,
+        env=docker_env,
     )
     image_id = inspect.stdout.strip()
     if not re.fullmatch(r"sha256:[a-f0-9]{64}", image_id):
         raise RuntimeError(f"Docker returned an invalid local image ID: {image_id!r}")
+    try:
+        postflight = json.loads(subprocess.run(
+            ["docker", "info", "--format", "{{json .}}"],
+            check=True,
+            text=True,
+            capture_output=True,
+            env=docker_env,
+        ).stdout)
+        same_daemon = postflight["ID"] == docker_details["docker_daemon_id"]
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, KeyError, TypeError):
+        same_daemon = None
+    try:
+        postflight_offload = json.loads(subprocess.run(
+            ["docker", "offload", "status", "--format", "json"],
+            check=True,
+            text=True,
+            capture_output=True,
+            env=docker_env,
+        ).stdout)
+        offload_stopped = (
+            postflight_offload["status"] == "STATUS_STOPPED"
+            and postflight_offload["engineStatus"] == "ENGINE_STATUS_STOPPED"
+            and postflight_offload["accountName"] == ""
+            and postflight_offload["engineWorkerID"] == ""
+        )
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, KeyError, TypeError):
+        offload_stopped = None
+    passed = completed.returncode == 0 and same_daemon is True and offload_stopped is True
     evidence = {
-        "schema_version": 1,
+        "schema_version": 2,
         "qualified_at": datetime.now(timezone.utc).isoformat(),
         "host": {
             "system": "Darwin",
             "architecture": "arm64",
-            "docker_version": subprocess.run(
-                ["docker", "version", "--format", "{{.Server.Version}}"],
-                check=True, text=True, capture_output=True,
-            ).stdout.strip(),
+            **docker_details,
         },
         "image": {
             "reference": args.image,
@@ -74,12 +189,33 @@ def main() -> int:
             "name": "container-integration",
             "status": "passed" if completed.returncode == 0 else "failed",
             "detail": (completed.stdout + completed.stderr)[-4000:],
+        }, {
+            "name": "docker-daemon-identity",
+            "status": (
+                "passed" if same_daemon is True else "failed" if same_daemon is False else "not_run"
+            ),
+            "detail": (
+                "Daemon identity remained stable" if same_daemon is True
+                else "Daemon identity changed" if same_daemon is False
+                else "Could not verify daemon identity"
+            ),
+        }, {
+            "name": "docker-offload",
+            "status": (
+                "passed" if offload_stopped is True
+                else "failed" if offload_stopped is False else "not_run"
+            ),
+            "detail": (
+                "Docker Offload remained stopped and unconfigured" if offload_stopped is True
+                else "Docker Offload was active or configured" if offload_stopped is False
+                else "Could not verify Docker Offload state"
+            ),
         }],
-        "result": "passed" if completed.returncode == 0 else "failed",
+        "result": "passed" if passed else "failed",
     }
     args.evidence.parent.mkdir(parents=True, exist_ok=True)
     args.evidence.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
-    return completed.returncode
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

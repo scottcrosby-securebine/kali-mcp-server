@@ -463,14 +463,15 @@ def main() -> int:
                 test "$(id -u)" = 1000
                 test "$(awk '/NoNewPrivs/ {print $2}' /proc/self/status)" = 1
                 test "$(awk '/CapEff/ {print $2}' /proc/self/status)" = 0000000000000000
-                test "$(ls /sys/class/net)" = lo
+                awk 'NR > 1 && $1 != "lo" {exit 1}' /proc/net/route
+                awk '$NF != "lo" {exit 1}' /proc/net/ipv6_route
                 ! touch /app/rootfs-must-be-read-only
                 test -w /results && test -w /reports
                 test ! -w /workspace && test ! -w /artifacts
             """]),
             capture_output=True,
         )
-        print("PASS runtime: non-root, NNP, cap-drop, read-only mounts, loopback-only network")
+        print("PASS runtime: non-root, NNP, cap-drop, read-only mounts, no non-loopback routes")
 
         client = McpClient(base)
         stack.callback(client.close)

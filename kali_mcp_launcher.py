@@ -8,6 +8,7 @@ import os
 import platform
 import shlex
 import stat
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,6 +54,26 @@ def detect_host(system: str, machine: str) -> Host:
     if system_name == "linux" and architecture:
         return Host("linux", architecture)
     raise LauncherError(f"unsupported_platform: {system or 'unknown'} {machine or 'unknown'} is not supported")
+
+
+def detect_current_host(system: str | None = None, machine: str | None = None) -> Host:
+    """Detect the physical host, including Apple Silicon processes running under Rosetta."""
+    system_name = system or platform.system()
+    machine_name = machine or platform.machine()
+    if machine is None and system_name.strip().lower() == "darwin" and machine_name.lower() in {"x86_64", "amd64"}:
+        try:
+            translated = subprocess.run(
+                ["/usr/sbin/sysctl", "-in", "sysctl.proc_translated"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+        else:
+            if translated.returncode == 0 and translated.stdout.strip() == "1":
+                machine_name = "arm64"
+    return detect_host(system_name, machine_name)
 
 
 def select_profile(host: Host, requested: str | None) -> str:
@@ -174,7 +195,7 @@ def main(
 ) -> int:
     args = _parser().parse_args(argv)
     try:
-        host = detect_host(system or platform.system(), machine or platform.machine())
+        host = detect_current_host(system, machine)
         profile = select_profile(host, args.profile)
         mounts = {name: getattr(args, name) for name in MOUNT_TARGETS if getattr(args, name)}
         command = build_docker_command(profile, args.image, mounts)

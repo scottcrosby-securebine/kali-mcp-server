@@ -64,7 +64,7 @@ class NucleiAdapterTests(unittest.TestCase):
                 )
                 self.assertIn("completed", result)
                 command = run.call_args.args[0]
-                self.assertEqual(str(approved), command[command.index("-t") + 1])
+                self.assertEqual(str(approved.resolve()), command[command.index("-t") + 1])
                 self.assertEqual("critical,medium", command[command.index("-s") + 1])
 
                 for templates, severity in (

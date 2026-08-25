@@ -1,21 +1,33 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/scottcrosby-securebine/kali-mcp-server/apple-silicon-evidence.schema.json",
+  "$id": "https://github.com/scottcrosby-securebine/kali-mcp-server/apple-silicon-evidence-v2.schema.json",
   "title": "Kali MCP Apple Silicon qualification evidence",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "qualified_at", "host", "image", "checks", "result"],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "qualified_at": {"type": "string", "format": "date-time"},
     "host": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["system", "architecture", "docker_version"],
+      "required": [
+        "system", "architecture", "docker_version", "docker_daemon_id", "docker_offload", "docker_platform",
+        "docker_architecture", "docker_context", "docker_endpoint"
+      ],
       "properties": {
         "system": {"const": "Darwin"},
         "architecture": {"const": "arm64"},
-        "docker_version": {"type": "string", "minLength": 1}
+        "docker_version": {"type": "string", "minLength": 1},
+        "docker_daemon_id": {"type": "string", "minLength": 1},
+        "docker_offload": {"const": "stopped-unconfigured"},
+        "docker_platform": {"const": "Docker Desktop"},
+        "docker_architecture": {"const": "arm64"},
+        "docker_context": {"const": "desktop-linux"},
+        "docker_endpoint": {
+          "type": "string",
+          "pattern": "^unix:///.+/\\.docker/run/docker\\.sock$"
+        }
       }
     },
     "image": {
