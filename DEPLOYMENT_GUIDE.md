@@ -85,7 +85,7 @@ Place archives beneath `/artifacts`.
 
 Both Trivy and Syft accept `source_type="registry"` with an explicit image reference. References must be credential-free and cannot contain a URL scheme or user information. Private-registry authentication is not supported.
 
-Example public reference: call `syft_sbom` with `target_ref="registry.example/authorized/image:tag"`, `source_type="registry"`, and `format="cyclonedx-json"`. Replace it only with a public image you are authorized to inspect.
+Syntax-only example: call `syft_sbom` with `target_ref="registry.example/authorized/image:tag"`, `source_type="registry"`, and `format="cyclonedx-json"`. The reserved `.example` name will not resolve; replace it with a real credential-free public image reference that you are authorized to inspect.
 
 ### Office artifact
 
@@ -97,7 +97,7 @@ Example public reference: call `syft_sbom` with `target_ref="registry.example/au
 
 `web_audit` includes bounded Nuclei observations in its returned summary while retaining the complete redacted finding set for its report.
 
-For a direct authorized website-CVE check, call `nuclei_scan` with a local or explicitly authorized HTTP(S) target and optional promoted template IDs and severities. For example: `target="http://127.0.0.1:8080"`, `templates="CVE-2021-41773"`, `severity="high,critical"`.
+For a direct authorized website-CVE check, call `nuclei_scan` with a profile-reachable, explicitly authorized HTTP(S) target and optional promoted template IDs and severities. Syntax example: `target="https://authorized-target.invalid"`, `templates="CVE-2021-41773"`, `severity="high,critical"`; the reserved `.invalid` name will not resolve and must be replaced. A service on host `127.0.0.1` is reachable from the container only with Linux `linux-full`; hardened bridge profiles require a target reachable from their Docker network.
 
 ### Result and report lifecycle
 
