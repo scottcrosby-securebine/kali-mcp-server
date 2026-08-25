@@ -12,7 +12,7 @@ cd kali-mcp-server
 docker build -t kali-mcp-server:latest .
 ```
 
-The supported launcher hosts are Linux amd64/arm64 and Apple Silicon. Intel macOS and Windows are not supported by the launcher. Physical Apple Silicon qualification is pending; QEMU Linux/arm64 CI is green but is not a macOS result.
+The supported launcher hosts are Linux amd64/arm64 and Apple Silicon. Intel macOS and Windows are not supported by the launcher. A recorded physical Apple Silicon Docker Desktop qualification passed, but its structured evidence predates the latest launcher home-mount change and must be refreshed before final release. Linux/arm64 separately passes a QEMU-backed CI gate. A Rosetta-translated launcher process on Apple Silicon is detected as Apple Silicon, while a physical Intel Mac remains unsupported.
 
 ## 2. Prepare optional mounts
 
@@ -79,5 +79,6 @@ python3 -m unittest discover -s tests -v
 - `prohibited_socket`: remove sockets and socket aliases from the mounted tree.
 - Scanner path errors: use a relative path beneath the appropriate mount, not `/tmp`, an absolute host path, or `..`.
 - `capability_missing`: the requested raw/link-layer operation is intentionally unavailable.
+- Known image defects: `amass_enum` currently fails in the hardened image ([#15](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/15)); multiple adapters reference a default or fallback wordlist path absent from the locked image, with `ffuf_scan`, `gobuster_scan`, and `wfuzz_scan` confirmed and the broader audit tracked in [#14](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/14).
 
 For the complete source matrix and report behavior, use the [deployment guide](DEPLOYMENT_GUIDE.md).
