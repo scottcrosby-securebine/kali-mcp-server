@@ -466,12 +466,15 @@ def main() -> int:
                 awk 'NR > 1 && $1 != "lo" {exit 1}' /proc/net/route
                 awk '$NF != "lo" {exit 1}' /proc/net/ipv6_route
                 ! touch /app/rootfs-must-be-read-only
+                test "$(stat -c '%u:%g %a' /home/pentest)" = "1000:1000 700"
+                touch /home/pentest/.runtime-write-test
+                rm /home/pentest/.runtime-write-test
                 test -w /results && test -w /reports
                 test ! -w /workspace && test ! -w /artifacts
             """]),
             capture_output=True,
         )
-        print("PASS runtime: non-root, NNP, cap-drop, read-only mounts, no non-loopback routes")
+        print("PASS runtime: non-root, private writable home, NNP, cap-drop, read-only mounts, no non-loopback routes")
 
         client = McpClient(base)
         stack.callback(client.close)

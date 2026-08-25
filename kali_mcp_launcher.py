@@ -163,7 +163,7 @@ def build_docker_command(profile: str, image: str, mounts: Mapping[str, str]) ->
         "--tmpfs",
         "/tmp:rw,nosuid,nodev,noexec",
         "--tmpfs",
-        "/home/pentest:rw,nosuid,nodev",
+        "/home/pentest:rw,nosuid,nodev,uid=1000,gid=1000,mode=0700",
     ]
 
     for name in MOUNT_TARGETS:
