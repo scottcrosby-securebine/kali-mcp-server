@@ -69,6 +69,7 @@ RUN sed -i 's|http://http.kali.org/kali/|http://kali.download/kali/|' /etc/apt/s
     && rm -rf /var/lib/apt/lists/*
 
 COPY kali_pentest_server.py requirements.txt ./
+COPY assets/ ./assets/
 COPY tests/fixtures/legacy_tool_contract.json /usr/local/share/kali-mcp/legacy_tool_contract.json
 COPY docker/packages.lock /usr/local/share/kali-mcp/packages.lock
 COPY docker/source-packages.lock /usr/local/share/kali-mcp/source-packages.lock
