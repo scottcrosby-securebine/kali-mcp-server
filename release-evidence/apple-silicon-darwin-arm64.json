@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "qualified_at": "2026-08-25T15:05:24.155071+00:00",
+  "host": {
+    "system": "Darwin",
+    "architecture": "arm64",
+    "docker_version": "29.2.1",
+    "docker_daemon_id": "07cdd963-cf89-4945-885a-ad9e86e0bb5a",
+    "docker_offload": "stopped-unconfigured",
+    "docker_platform": "Docker Desktop",
+    "docker_architecture": "arm64",
+    "docker_context": "desktop-linux",
+    "docker_endpoint": "unix:///Users/scottacrosby/.docker/run/docker.sock"
+  },
+  "image": {
+    "reference": "kali-mcp-server@sha256:75818ae4b7d18797440702b2a0dd9b567d1420f7bcf0ddd627fbb010b0276bae",
+    "digest": "sha256:75818ae4b7d18797440702b2a0dd9b567d1420f7bcf0ddd627fbb010b0276bae",
+    "image_id": "sha256:75818ae4b7d18797440702b2a0dd9b567d1420f7bcf0ddd627fbb010b0276bae"
+  },
+  "checks": [
+    {
+      "name": "container-integration",
+      "status": "passed",
+      "detail": "PASS runtime: non-root, NNP, cap-drop, read-only mounts, no non-loopback routes\nPASS MCP initialize/tools/list: 42 preserved + 4 additions\nPASS MCP tools/call: all 46 declared tools return text for default arguments\nPASS mounted scanner path confinement creates no result\nPASS Syft project -> normalized result -> HTML report\nPASS Syft deterministic Docker and OCI archives\nPASS oletools harmless local Office artifact\nPASS Syft hermetic registry in isolated shared network namespace\nPASS isolated loopback Nmap TCP connect; raw/link-layer operation unavailable\nPASS Trivy controlled database-unavailable failure creates no result\nPASS container integration gate (linux/arm64, mac-hardened)\n#0 building with \"default\" instance using docker driver\n\n#1 [internal] load build definition from Dockerfile\n#1 transferring dockerfile: 124B 0.0s done\n#1 DONE 0.0s\n\n#2 [internal] load .dockerignore\n#2 transferring context: 2B 0.0s done\n#2 DONE 0.0s\n\n#3 [internal] load build context\n#3 transferring context: 62B 0.0s done\n#3 DONE 0.0s\n\n#4 [1/2] COPY marker.txt /fixture-marker.txt\n#4 CACHED\n\n#5 [2/2] COPY dpkg-status /var/lib/dpkg/status\n#5 CACHED\n\n#6 exporting to image\n#6 exporting layers done\n#6 exporting manifest sha256:af9621cf46d0a1d8346e7689a4689bec15451a4387729180b283976c0b08c927 done\n#6 exporting config sha256:c05756bcab1b9fdf3b3fcf75b72502258feae24fa4b8ff6e580e26681a401266 0.0s done\n#6 exporting attestation manifest sha256:57ccd21659c5b0a9cdf06097c29b918f759514d66555fd4799d709b1c80375dd\n#6 exporting attestation manifest sha256:57ccd21659c5b0a9cdf06097c29b918f759514d66555fd4799d709b1c80375dd 0.0s done\n#6 exporting manifest list sha256:ed1a16b79d6c58c1790bdb9ddb768dd7b84b9fa4fcd0483caaf6de8f91c7f0ec 0.0s done\n#6 naming to docker.io/library/kali-mcp-fixture:48620f19c517 done\n#6 unpacking to docker.io/library/kali-mcp-fixture:48620f19c517 0.1s done\n#6 DONE 0.3s\n\nView build details: docker-desktop://dashboard/build/default/default/3cay121p021sgk2xvfme5guvd\n"
+    },
+    {
+      "name": "docker-daemon-identity",
+      "status": "passed",
+      "detail": "Daemon identity remained stable"
+    },
+    {
+      "name": "docker-offload",
+      "status": "passed",
+      "detail": "Docker Offload remained stopped and unconfigured"
+    }
+  ],
+  "result": "passed"
+}
