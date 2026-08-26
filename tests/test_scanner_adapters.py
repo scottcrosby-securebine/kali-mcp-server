@@ -235,5 +235,106 @@ class ScannerAdapterTests(unittest.TestCase):
             self.assertEqual("scan-time", stored["metadata"]["database_UpdatedAt"])
 
 
+class NmapCaptureTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    SAMPLE = (
+        '<?xml version="1.0"?><nmaprun><host><ports>'
+        '<port protocol="tcp" portid="80"><state state="open"/>'
+        '<service name="http" product="nginx" version="1.18"/>'
+        '<script id="http-title" output="Welcome"/></port>'
+        '<port protocol="tcp" portid="22"><state state="closed"/><service name="ssh"/></port>'
+        '<port protocol="tcp" portid="445"><state state="open"/><service name="microsoft-ds"/>'
+        '<script id="smb-vuln-ms17-010" output="VULNERABLE: remote code execution"/></port>'
+        '</ports></host></nmaprun>'
+    )
+
+    def test_parse_extracts_open_ports_and_scripts_with_severity(self):
+        findings = self.server._parse_nmap_xml(self.SAMPLE)
+        by_id = {f["id"]: f for f in findings}
+        # open ports only (22 is closed -> excluded)
+        self.assertIn("port-80-tcp", by_id)
+        self.assertIn("port-445-tcp", by_id)
+        self.assertNotIn("port-22-tcp", by_id)
+        self.assertEqual("INFO", by_id["port-80-tcp"]["Severity"])
+        self.assertEqual("nginx", by_id["port-80-tcp"]["product"])
+        # VULNERABLE script -> HIGH; ordinary script -> INFO
+        self.assertEqual("HIGH", by_id["smb-vuln-ms17-010"]["Severity"])
+        self.assertEqual("INFO", by_id["http-title"]["Severity"])
+
+    def test_parse_never_raises_on_hostile_or_empty_xml(self):
+        for payload in (
+            "", "<not xml", "not even close",
+            '<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/hostname">]><nmaprun>&x;</nmaprun>',
+            '<!DOCTYPE lolz [<!ENTITY a "aa"><!ENTITY b "&a;&a;">]><nmaprun><x>&b;</x></nmaprun>',
+        ):
+            with self.subTest(payload=payload[:20]):
+                self.assertEqual([], self.server._parse_nmap_xml(payload))
+
+    def test_tool_text_return_is_unchanged_and_result_is_captured(self):
+        captured = {}
+
+        def fake_run(cmd, timeout=None):
+            self.assertNotIn("shell", cmd)
+            oxi = cmd.index("-oX")
+            # -oX path must precede the "--" separator
+            self.assertLess(oxi, cmd.index("--"))
+            Path(cmd[oxi + 1]).write_text(self.SAMPLE, encoding="utf-8")
+            return "PORT STATE SERVICE\n80/tcp open http"
+
+        def fake_write(document):
+            captured["doc"] = document
+            return "Z" * 32
+
+        with (
+            patch.object(self.server, "run_command", fake_run),
+            patch.object(self.server, "_write_scanner_result", fake_write),
+        ):
+            out = asyncio.run(self.server.nmap_scan("10.0.0.1"))
+        self.assertEqual("PORT STATE SERVICE\n80/tcp open http", out)
+        self.assertEqual("nmap", captured["doc"]["scanner"])
+        self.assertEqual(1, captured["doc"]["schema_version"])
+        self.assertEqual(2, len([f for f in captured["doc"]["findings"] if f["id"].startswith("port-")]))
+
+    def test_single_id_report_accepts_a_captured_nmap_result(self):
+        document = {
+            "schema_version": 1, "scanner": "nmap", "source_type": "host",
+            "target_ref": "10.0.0.1", "status": "success",
+            "findings": [{"id": "port-80-tcp", "Severity": "INFO", "Title": "80/tcp http open"}],
+            "metadata": {},
+        }
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            results = root / "results"
+            reports = root / "reports"
+            results.mkdir()
+            (results / f"{'A' * 32}.json").write_text(json.dumps(document), encoding="utf-8")
+            with (
+                patch.object(self.server, "RESULTS_ROOT", results),
+                patch.object(self.server, "REPORTS_ROOT", reports),
+                patch.object(self.server.secrets, "token_urlsafe", return_value="R" * 32),
+            ):
+                response = asyncio.run(self.server.generate_report("A" * 32))
+            self.assertEqual(f"/reports/{'R' * 32}.html", response)
+            self.assertNotIn("Error", response)
+
+    def test_persist_failure_is_swallowed_and_scan_still_returns_text(self):
+        def fake_run(cmd, timeout=None):
+            Path(cmd[cmd.index("-oX") + 1]).write_text(self.SAMPLE, encoding="utf-8")
+            return "nmap text output"
+
+        def boom(_document):
+            raise OSError("disk full")
+
+        with (
+            patch.object(self.server, "run_command", fake_run),
+            patch.object(self.server, "_write_scanner_result", boom),
+        ):
+            out = asyncio.run(self.server.nmap_port_scan("10.0.0.1", "80"))
+        self.assertEqual("nmap text output", out)
+
+
 if __name__ == "__main__":
     unittest.main()
