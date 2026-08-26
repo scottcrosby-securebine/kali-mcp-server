@@ -156,3 +156,44 @@ Persistent results DB (tmpfs session is enough); report history/comparison;
 non-HTML output; Nessus or any tool not already in the 46; cross-tool semantic
 finding merge; parsing the Tier-2 tail into findings (raw block unless a
 specific tool later warrants it).
+
+---
+
+## P2 wave 1 — nmap family (addendum, anchor for the wave)
+
+Scope: wire the six nmap tools to capture, per D1 (preserve text, side-channel
+structured). NO change to any tool's human-readable str return.
+
+Tools: nmap_scan, nmap_service_scan, nmap_vuln_scan, nmap_comprehensive_scan,
+nmap_port_scan, nmap_script_scan.
+
+Mechanism: a shared helper (e.g. `_run_nmap_with_capture(cmd, scanner, target,
+timeout)`) that:
+1. Adds `-oX <tmpfile>` to the command (XML to a temp file under /tmp; stdout
+   stays the normal operator text). Uses a fresh temp path; cleans it up.
+2. Runs via the existing `run_command` seam and returns its text UNCHANGED.
+3. Parses the XML with stdlib `xml.etree.ElementTree` into normalized findings:
+   each open port → one INFO finding {id: "port-<portid>-<proto>", Severity:
+   "INFO", Title: "<portid>/<proto> <service> open", plus product/version/state
+   fields}; each NSE `<script>` element → one finding {id: script id, Title:
+   script id, Severity: "HIGH" if its output contains "VULNERABLE" else "INFO",
+   evidence: the script output}. Redact via _redact_scanner_data.
+4. Best-effort `_write_scanner_result` (swallow OSError; a persist failure must
+   not fail the scan), scanner label = the specific tool name (e.g. "nmap" for
+   nmap_scan; keep it stable and human-meaningful).
+
+Invariants: arg-list command (no shell); the `-oX` path is server-generated, not
+caller data; XML parse must not raise on malformed/empty output (guard and skip
+to empty findings); no raw sockets/root; the 200-line public text bound and
+opaque ids unchanged; findings feed the P1 combined report and list_results
+unchanged.
+
+Test seams (extend tests/test_scanner_adapters.py or test_reports.py): the
+capture helper parses a sample nmap XML into the expected findings (ports +
+a VULNERABLE script → HIGH); a malformed/empty XML yields zero findings and no
+raise; the tool's text return is unchanged; a persist failure is swallowed.
+Contract: nmap tool signatures unchanged (no fixture change; these are the 42
+preserved tools).
+
+Out of scope for this wave: the other tool families (separate waves), and
+severity heuristics beyond the VULNERABLE-string rule.
