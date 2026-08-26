@@ -260,6 +260,49 @@ class ReportTests(unittest.TestCase):
             self.assertNotIn("report=", response)
             self.assertEqual([], list(reports.glob("*.html")) if reports.exists() else [])
 
+    def test_report_applies_securebine_design_system(self):
+        document = {
+            "schema_version": 1, "scanner": "trivy", "source_type": "filesystem",
+            "target_ref": "demo", "status": "success",
+            "findings": [
+                {"VulnerabilityID": "CVE-A", "Severity": "CRITICAL", "Title": "crit"},
+                {"VulnerabilityID": "CVE-B", "Severity": "HIGH", "Title": "high"},
+            ],
+            "metadata": {},
+        }
+        report = self.server._render_report(document)
+        # Scriptless + self-contained: no JS, no theme toggle, no external fetch.
+        self.assertNotIn("<script", report.lower())
+        self.assertNotIn("onclick", report.lower())
+        # Theme via prefers-color-scheme, not a stamped attribute or a control.
+        self.assertIn("@media (prefers-color-scheme: light)", report)
+        # Brand token present (source of record: securebine-design/tokens.css).
+        self.assertIn("#F5A701", report)
+        # Logos embedded as CSS background data: URIs, never <img> tags; CSP allows data:.
+        self.assertIn("data:image/png;base64,", report)
+        self.assertNotIn("<img", report.lower())
+        self.assertIn("img-src data:", report)
+        self.assertTrue(self.server.REPORT_LOGO_DARK.startswith("data:image/png;base64,"))
+        self.assertNotEqual(self.server.REPORT_LOGO_DARK, self.server.REPORT_LOGO_LIGHT)
+        # STANDARD 6m: each severity mark carries its WORD, not colour alone.
+        self.assertIn("CRITICAL</span>", report)
+        self.assertIn('class="sev sev-critical"', report)
+        self.assertIn('class="sev sev-high"', report)
+        # h1 contract preserved for downstream tooling.
+        self.assertIn("<h1>trivy report</h1>", report)
+
+    def test_report_severity_word_survives_unknown_severity(self):
+        document = {
+            "schema_version": 1, "scanner": "syft", "source_type": "dir",
+            "target_ref": "demo", "status": "success",
+            "findings": [{"id": "X", "severity": "weird-value", "title": "t"}],
+            "metadata": {},
+        }
+        report = self.server._render_report(document)
+        # An unrecognised severity still prints its word in a mark, just without a colour class.
+        self.assertIn('class="sev"', report)
+        self.assertIn("weird-value", report)
+
 
 if __name__ == "__main__":
     unittest.main()
