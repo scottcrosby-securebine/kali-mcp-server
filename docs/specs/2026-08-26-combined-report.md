@@ -310,3 +310,56 @@ the single-ID report accepts each new scanner. Mock run_command; no real binarie
 
 Out of scope: the DNS/recon family and the raw-text tail (later waves); deep
 per-tool analysis beyond the mappings above.
+
+---
+
+## P2 wave 4 — DNS/recon family (addendum, anchor for the wave)
+
+Scope: wire the three DNS/recon tools that emit a single structured file to
+capture, per D1. Stacked on wave 3; reuse `_run_with_capture`, `_load_json`,
+the never-raise discipline.
+
+Tools + flag + parser (each returns [] on bad input, never raises; findings
+redacted; normalize to id/Title/Severity/evidence — all INFO, these are
+enumeration/disclosure results):
+- dns_recon (dnsrecon): `-j <file>` (JSON array of {type,name,address,...}).
+  Each record -> INFO {id:"dns-<type>-<name>", Title:"<type> <name> <address>",
+  evidence}. Tolerate a top-level list or a dict wrapping a list.
+- subfinder_scan: `-oJ -o <file>` (JSONL, one {host/ip,source} per line). Each
+  line -> INFO {id:"subdomain-<host>", Title:host, evidence:source}. Parse
+  line-by-line with a json-or-skip per line (never raise).
+- amass_enum: `-json <file>` (JSONL, one {name,addresses,...} per line). Each
+  line -> INFO {id:"subdomain-<name>", Title:name, evidence}. (NOTE: amass may
+  fail to run under the hardened runtime per issue #15; capture is best-effort,
+  so a non-running amass simply persists nothing — wiring is future-proof.)
+
+Add a small shared `_parse_jsonl(text, key_fn)` OR two tiny per-tool parsers;
+each line parsed independently, a bad line skipped, whole-file failure -> [].
+
+Mechanism: route the three tools through `_run_with_capture` with scanner
+labels dns_recon/subfinder/amass and the right out_args + suffix. Keep each
+tool's validation, command construction, and str return EXACTLY as-is except
+routing + adding the output flag. Text output byte-unchanged. Add the three
+labels to the single-ID generate_report allowlist.
+
+Invariants (same as prior waves): arg-list command (no shell); server-generated
+out path; parsers never raise (incl. JSON depth bomb via _load_json); stdlib
+json only; findings redacted before persist; 200-line bound + opaque ids
+unchanged; the shared runner's leading-dash guard + size cap apply; 42 preserved
+tool signatures unchanged (NO fixture change).
+
+Test seams (extend tests/test_scanner_adapters.py): each parser maps a
+representative sample (dnsrecon JSON array; subfinder JSONL; amass JSONL) to the
+expected INFO findings; malformed/empty/hostile -> [] no raise; each tool's
+text return unchanged vs a run_command mock; single-ID report accepts each new
+scanner. Mock run_command; no real binaries.
+
+DEFERRED from this wave, with reasons (later increment):
+- dns_enum: runs three separate commands (nslookup/dig/host) concatenated — no
+  single structured output; needs a multi-source or text-parse approach.
+- fierce: text-only output; belongs to the Tier-2 raw-text tail.
+- theharvester_scan: `-f <name>` writes <name>.json/.xml (appends its own
+  extension), which breaks the shared runner's exact-out-path model; needs a
+  basename-then-read variant.
+
+Out of scope: the raw-text tail and the three deferred tools above.
