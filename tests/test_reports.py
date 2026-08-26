@@ -291,6 +291,95 @@ class ReportTests(unittest.TestCase):
         # h1 contract preserved for downstream tooling.
         self.assertIn("<h1>trivy report</h1>", report)
 
+    def test_generate_report_no_ref_combines_all_captured_results(self):
+        docs = [
+            {"schema_version": 1, "scanner": "nmap", "target_ref": "10.0.0.1",
+             "status": "success", "findings": [{"id": "p80", "Severity": "INFO", "Title": "80 open"}], "metadata": {}},
+            {"schema_version": 1, "scanner": "nuclei", "target_ref": "http://x",
+             "status": "success", "findings": [
+                 {"VulnerabilityID": "CVE-9", "Severity": "HIGH", "Title": "RCE"},
+                 {"VulnerabilityID": "CVE-9", "Severity": "HIGH", "Title": "RCE"},  # exact duplicate
+             ], "metadata": {}},
+            {"schema_version": 1, "scanner": "sslscan", "target_ref": "x:443",
+             "status": "failed", "findings": [], "metadata": {}},
+        ]
+        with tempfile.TemporaryDirectory() as root_text:
+            root = Path(root_text)
+            results = root / "results"
+            reports = root / "reports"
+            results.mkdir()
+            for index, doc in enumerate(docs):
+                (results / f"{chr(65 + index) * 32}.json").write_text(json.dumps(doc), encoding="utf-8")
+            with (
+                patch.object(self.server, "RESULTS_ROOT", results),
+                patch.object(self.server, "REPORTS_ROOT", reports),
+                patch.object(self.server.secrets, "token_urlsafe", return_value="R" * 32),
+            ):
+                response = asyncio.run(self.server.generate_report())  # no ref
+            self.assertEqual(f"/reports/{'R' * 32}.html", response)
+            report = (reports / f"{'R' * 32}.html").read_text(encoding="utf-8")
+            # Combined title and per-scanner sections.
+            self.assertIn("<h1>Combined scan report</h1>", report)
+            self.assertIn('class="scanner-head"', report)
+            for scanner in ("nmap", "nuclei", "sslscan"):
+                self.assertIn(scanner, report)
+            # Exact-dedupe: CVE-9 counted once, aggregate HIGH == 1.
+            self.assertIn("HIGH</th><td>1", report)
+            # Failed scan surfaced in coverage/status.
+            self.assertIn("failed", report.lower())
+            # Invariants: scriptless, no img tag, brand token present.
+            self.assertNotIn("<script", report.lower())
+            self.assertNotIn("<img", report.lower())
+            self.assertIn("#F5A701", report)
+
+    def test_generate_report_no_ref_with_empty_store_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as root_text:
+            results = Path(root_text) / "results"
+            results.mkdir()
+            with patch.object(self.server, "RESULTS_ROOT", results):
+                response = asyncio.run(self.server.generate_report())
+            self.assertNotIn("/reports/", response)
+            self.assertIn("No captured scan results", response)
+
+    def test_list_results_reports_captured_scans(self):
+        doc = {"schema_version": 1, "scanner": "nmap", "target_ref": "10.0.0.1",
+               "status": "success", "findings": [{"id": "p80"}], "metadata": {}}
+        with tempfile.TemporaryDirectory() as root_text:
+            results = Path(root_text) / "results"
+            results.mkdir()
+            (results / f"{'A' * 32}.json").write_text(json.dumps(doc), encoding="utf-8")
+            with patch.object(self.server, "RESULTS_ROOT", results):
+                listed = asyncio.run(self.server.list_results())
+            self.assertIn(f"result-id={'A' * 32}", listed)
+            self.assertIn("tool=nmap", listed)
+            self.assertIn("target=10.0.0.1", listed)
+            self.assertIn("findings=1", listed)
+            self.assertRegex(listed, r"time=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+
+    def test_nuclei_scan_persists_a_normalized_result(self):
+        captured = {}
+
+        def fake_capture(_cmd):
+            return {"findings": [{"template-id": "cve-x", "info": {"severity": "high", "name": "RCE"}}],
+                    "summary": "✅ Nuclei scan completed: 1 finding(s)"}
+
+        def fake_write(document):
+            captured["doc"] = document
+            return "Z" * 32
+
+        with (
+            patch.object(self.server, "_run_nuclei_capture", fake_capture),
+            patch.object(self.server, "_write_scanner_result", fake_write),
+            patch.object(self.server, "_nuclei_template_path", lambda _ref: self.server.NUCLEI_PROMOTED_ROOT),
+        ):
+            result = asyncio.run(self.server.nuclei_scan("example.test"))
+        self.assertIsInstance(result, str)
+        self.assertEqual("nuclei", captured["doc"]["scanner"])
+        self.assertEqual(1, captured["doc"]["schema_version"])
+        finding = captured["doc"]["findings"][0]
+        self.assertEqual("HIGH", finding["Severity"])  # surfaced from info.severity
+        self.assertEqual("RCE", finding["Title"])       # surfaced from info.name
+
     def test_report_severity_word_survives_unknown_severity(self):
         document = {
             "schema_version": 1, "scanner": "syft", "source_type": "dir",
