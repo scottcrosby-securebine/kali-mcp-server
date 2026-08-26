@@ -10,7 +10,7 @@
     "docker_platform": "Docker Desktop",
     "docker_architecture": "arm64",
     "docker_context": "desktop-linux",
-    "docker_endpoint": "unix:///Users/scottacrosby/.docker/run/docker.sock"
+    "docker_endpoint": "unix:///Users/redacted/.docker/run/docker.sock"
   },
   "image": {
     "reference": "kali-mcp-server@sha256:75818ae4b7d18797440702b2a0dd9b567d1420f7bcf0ddd627fbb010b0276bae",
