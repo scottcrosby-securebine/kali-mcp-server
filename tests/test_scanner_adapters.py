@@ -336,5 +336,162 @@ class NmapCaptureTests(unittest.TestCase):
         self.assertEqual("nmap text output", out)
 
 
+class TlsCaptureTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    SSLSCAN_XML = (
+        '<?xml version="1.0"?><document><ssltest host="h" port="443">'
+        '<protocol type="ssl" version="3" enabled="1"/>'
+        '<protocol type="tls" version="1.0" enabled="1"/>'
+        '<protocol type="tls" version="1.2" enabled="1"/>'
+        '<cipher status="accepted" sslversion="TLSv1.0" bits="112" cipher="ECDHE-RSA-RC4-SHA"/>'
+        '<cipher status="accepted" sslversion="TLSv1.2" bits="256" cipher="ECDHE-RSA-AES256-GCM-SHA384"/>'
+        '</ssltest></document>'
+    )
+    TESTSSL_JSON = (
+        '[{"id":"BEAST","severity":"HIGH","finding":"vulnerable","cve":"CVE-2011-3389"},'
+        '{"id":"cert_trust","severity":"OK","finding":"valid"}]'
+    )
+    SSLYZE_JSON = (
+        '{"server_scan_results":[{"scan_result":{'
+        '"ssl_3_0_cipher_suites":{"result":{"accepted_cipher_suites":[{"cipher_suite":{"name":"TLS_RSA_WITH_3DES_EDE_CBC_SHA"}}]}},'
+        '"tls_1_2_cipher_suites":{"result":{"accepted_cipher_suites":[{"cipher_suite":{"name":"TLS_AES_256_GCM_SHA384"}}]}}}}]}'
+    )
+
+    def test_sslscan_parser_grades_protocols_and_ciphers(self):
+        by_id = {f["id"]: f for f in self.server._parse_sslscan_xml(self.SSLSCAN_XML)}
+        self.assertEqual("HIGH", by_id["tls-proto-sslv3"]["Severity"])
+        self.assertEqual("MEDIUM", by_id["tls-proto-tlsv1.0"]["Severity"])
+        self.assertNotIn("tls-proto-tlsv1.2", by_id)  # strong protocol not flagged
+        self.assertEqual("HIGH", by_id["tls-cipher-ECDHE-RSA-RC4-SHA"]["Severity"])
+        self.assertEqual("INFO", by_id["tls-cipher-ECDHE-RSA-AES256-GCM-SHA384"]["Severity"])
+
+    def test_testssl_parser_maps_severity_and_keeps_cve(self):
+        by_id = {f["id"]: f for f in self.server._parse_testssl_json(self.TESTSSL_JSON)}
+        self.assertEqual("HIGH", by_id["BEAST"]["Severity"])
+        self.assertEqual("CVE-2011-3389", by_id["BEAST"]["cve"])
+        self.assertEqual("INFO", by_id["cert_trust"]["Severity"])  # OK -> INFO
+
+    def test_sslyze_parser_grades_weak_ciphers(self):
+        findings = self.server._parse_sslyze_json(self.SSLYZE_JSON)
+        self.assertTrue(any(f["Severity"] == "HIGH" and "3DES" in f["id"] for f in findings))
+
+    def test_all_tls_parsers_never_raise_on_bad_input(self):
+        for parser in (self.server._parse_sslscan_xml, self.server._parse_testssl_json, self.server._parse_sslyze_json):
+            for payload in ("", "garbage", "<not xml", "{bad json", None, 42, "[]", "{}"):
+                with self.subTest(parser=parser.__name__, payload=repr(payload)[:16]):
+                    self.assertEqual([], parser(payload))
+        # XXE / billion-laughs on the XML parser
+        self.assertEqual([], self.server._parse_sslscan_xml(
+            '<!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/hostname">]><document>&x;</document>'))
+
+    def test_tls_tools_return_text_unchanged_and_capture(self):
+        cases = [
+            ("sslscan_scan", "sslscan", "--xml=", self.SSLSCAN_XML),
+            ("testssl_scan", "testssl", "--jsonfile", self.TESTSSL_JSON),
+            ("sslyze_scan", "sslyze", "--json_out=", self.SSLYZE_JSON),
+        ]
+        for tool, scanner, flag, sample in cases:
+            with self.subTest(tool=tool):
+                captured = {}
+
+                def fake_run(cmd, timeout=None, _flag=flag, _sample=sample):
+                    self.assertNotIn("shell", cmd)
+                    path = None
+                    for i, arg in enumerate(cmd):
+                        if arg.startswith(_flag) and "=" in _flag:
+                            path = arg.split("=", 1)[1]
+                        elif arg == _flag.rstrip("="):
+                            path = cmd[i + 1]
+                    Path(path).write_text(_sample, encoding="utf-8")
+                    return f"{scanner} TEXT"
+
+                def fake_write(document, _c=captured):
+                    _c["doc"] = document
+                    return "Z" * 32
+
+                with (
+                    patch.object(self.server, "run_command", fake_run),
+                    patch.object(self.server, "_write_scanner_result", fake_write),
+                ):
+                    out = asyncio.run(getattr(self.server, tool)("example.test"))
+                self.assertEqual(f"{scanner} TEXT", out)
+                self.assertEqual(scanner, captured["doc"]["scanner"])
+                self.assertTrue(captured["doc"]["findings"])
+
+    def test_tls_persist_failure_is_swallowed(self):
+        def fake_run(cmd, timeout=None):
+            for arg in cmd:
+                if arg.startswith("--xml="):
+                    Path(arg.split("=", 1)[1]).write_text(self.SSLSCAN_XML, encoding="utf-8")
+            return "sslscan text"
+
+        with (
+            patch.object(self.server, "run_command", fake_run),
+            patch.object(self.server, "_write_scanner_result", lambda _d: (_ for _ in ()).throw(OSError("full"))),
+        ):
+            out = asyncio.run(self.server.sslscan_scan("example.test"))
+        self.assertEqual("sslscan text", out)
+
+    def test_deeply_nested_structured_output_does_not_fail_the_scan(self):
+        # A JSON depth bomb raises RecursionError inside the parser; best-effort
+        # capture must swallow it and still return the tool's text (B1).
+        bomb = "[" * 100000 + "]" * 100000
+        self.assertEqual([], self.server._parse_testssl_json(bomb))
+        self.assertEqual([], self.server._parse_sslyze_json(bomb))
+
+        def fake_run(cmd, timeout=None):
+            for i, arg in enumerate(cmd):
+                if arg == "--jsonfile":
+                    Path(cmd[i + 1]).write_text(bomb, encoding="utf-8")
+            return "testssl text"
+
+        with patch.object(self.server, "run_command", fake_run):
+            out = asyncio.run(self.server.testssl_scan("example.test"))
+        self.assertEqual("testssl text", out)
+
+    def test_target_beginning_with_dash_is_rejected(self):
+        # Argument-injection guard: a leading '-' target must not reach the tool.
+        with patch.object(self.server, "run_command") as run:
+            for tool in ("sslscan_scan", "testssl_scan", "sslyze_scan"):
+                with self.subTest(tool=tool):
+                    response = asyncio.run(getattr(self.server, tool)("--xml=/etc/passwd"))
+                    self.assertIn("Error", response)
+            run.assert_not_called()
+
+    def test_sslyze_weak_protocol_bumps_cipher_severity(self):
+        sslyze = (
+            '{"server_scan_results":[{"scan_result":{"ssl_3_0_cipher_suites":'
+            '{"result":{"accepted_cipher_suites":[{"cipher_suite":{"name":"TLS_ECDHE_RSA_AES128"}}]}}}}]}'
+        )
+        findings = self.server._parse_sslyze_json(sslyze)
+        self.assertTrue(findings)
+        self.assertTrue(all(f["Severity"] == "HIGH" for f in findings))  # SSLv3 bump
+
+    def test_single_id_report_accepts_tls_scanners(self):
+        for scanner in ("sslscan", "testssl", "sslyze"):
+            with self.subTest(scanner=scanner):
+                document = {
+                    "schema_version": 1, "scanner": scanner, "source_type": "host",
+                    "target_ref": "h:443", "status": "success",
+                    "findings": [{"id": "x", "Severity": "INFO", "Title": "x"}], "metadata": {},
+                }
+                with tempfile.TemporaryDirectory() as root_text:
+                    root = Path(root_text)
+                    results = root / "results"
+                    reports = root / "reports"
+                    results.mkdir()
+                    (results / f"{'A' * 32}.json").write_text(json.dumps(document), encoding="utf-8")
+                    with (
+                        patch.object(self.server, "RESULTS_ROOT", results),
+                        patch.object(self.server, "REPORTS_ROOT", reports),
+                        patch.object(self.server.secrets, "token_urlsafe", return_value="R" * 32),
+                    ):
+                        response = asyncio.run(self.server.generate_report("A" * 32))
+                    self.assertNotIn("Error", response)
+
+
 if __name__ == "__main__":
     unittest.main()
