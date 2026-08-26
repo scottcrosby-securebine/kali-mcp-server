@@ -491,6 +491,102 @@ class TlsCaptureTests(unittest.TestCase):
                     ):
                         response = asyncio.run(self.server.generate_report("A" * 32))
                     self.assertNotIn("Error", response)
+class WebCaptureTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    def test_parsers_map_representative_samples(self):
+        s = self.server
+        ww = {f["id"]: f for f in s._parse_whatweb_json(json.dumps([{"plugins": {"nginx": {"version": ["1.18"]}, "jQuery": {}}}]))}
+        self.assertIn("web-tech-nginx", ww)
+        self.assertEqual("INFO", ww["web-tech-nginx"]["Severity"])
+        nk = {f["id"]: f["Severity"] for f in s._parse_nikto_json(json.dumps({"vulnerabilities": [{"OSVDB": "3092", "msg": "x", "url": "/a"}, {"id": "0", "msg": "note"}]}))}
+        self.assertEqual("MEDIUM", nk["3092"])
+        self.assertEqual("INFO", nk["nikto-2"])
+        ff = s._parse_ffuf_json(json.dumps({"results": [{"url": "http://x/admin", "status": 200, "length": 10}]}))
+        self.assertEqual("INFO", ff[0]["Severity"])
+        self.assertEqual("WAF detected: Cloudflare", s._parse_wafw00f_json(json.dumps([{"detected": True, "firewall": "Cloudflare"}]))[0]["Title"])
+        self.assertEqual("No WAF detected", s._parse_wafw00f_json(json.dumps([{"detected": False}]))[0]["Title"])
+        self.assertTrue(s._parse_paths_text("/admin (Status: 200)\nStarting gobuster"))
+        self.assertTrue(s._parse_paths_text("+ http://x/admin (CODE:200|SIZE:10)\n==> DIRECTORY: /x/"))
+
+    def test_redaction_is_not_catastrophic_on_long_scanner_strings(self):
+        # Guard against ReDoS in the shared secret-redaction patterns: a long
+        # alphanumeric run (as a hostile scanned target can reflect into a
+        # finding) must redact in linear time, not O(n^2).
+        import time
+        big = "a" * (256 * 1024)
+        start = time.monotonic()
+        self.server._redact_scanner_data(big)
+        self.assertLess(time.monotonic() - start, 5.0)
+        # A real credential URL is still redacted after the pattern was bounded.
+        self.assertNotIn("hunter2", self.server._redact_scanner_data("mongodb://a:hunter2@h/x"))
+
+    def test_web_parsers_never_raise(self):
+        s = self.server
+        for parser in (s._parse_whatweb_json, s._parse_nikto_json,
+                       s._parse_ffuf_json, s._parse_wafw00f_json, s._parse_paths_text):
+            for payload in ("", "garbage", "{bad json", "[1,2,3]", None, 42, "[" * 50000 + "]" * 50000):
+                with self.subTest(parser=parser.__name__, payload=repr(payload)[:12]):
+                    self.assertEqual([], parser(payload))
+
+    def test_web_tools_return_text_unchanged_and_capture(self):
+        cases = [
+            ("whatweb_scan", "whatweb", "--log-json=", json.dumps([{"plugins": {"nginx": {}}}])),
+            ("nikto_scan", "nikto", "-o", json.dumps({"vulnerabilities": [{"OSVDB": "1", "msg": "m", "url": "/"}]})),
+            ("ffuf_scan", "ffuf", "-o", json.dumps({"results": [{"url": "http://x/FUZZ", "status": 200}]})),
+            ("gobuster_scan", "gobuster", "-o", "/admin (Status: 200)"),
+            ("dirb_scan", "dirb", "-o", "+ http://x/admin (CODE:200|SIZE:1)"),
+            ("wafw00f_scan", "wafw00f", "-o", json.dumps([{"detected": True, "firewall": "CF"}])),
+        ]
+        targets = {"ffuf_scan": "http://x/FUZZ"}
+        for tool, scanner, flag, sample in cases:
+            with self.subTest(tool=tool):
+                captured = {}
+
+                def fake_run(cmd, timeout=None, _flag=flag, _sample=sample):
+                    self.assertNotIn("shell", cmd)
+                    path = None
+                    for i, arg in enumerate(cmd):
+                        if _flag.endswith("=") and arg.startswith(_flag):
+                            path = arg.split("=", 1)[1]
+                        elif arg == _flag and not _flag.endswith("="):
+                            path = cmd[i + 1]
+                    Path(path).write_text(_sample, encoding="utf-8")
+                    return f"{scanner} TEXT"
+
+                def fake_write(document, _c=captured):
+                    _c["doc"] = document
+                    return "Z" * 32
+
+                with (
+                    patch.object(self.server, "run_command", fake_run),
+                    patch.object(self.server, "_write_scanner_result", fake_write),
+                ):
+                    out = asyncio.run(getattr(self.server, tool)(targets.get(tool, "example.test")))
+                self.assertEqual(f"{scanner} TEXT", out)
+                self.assertEqual(scanner, captured["doc"]["scanner"])
+
+    def test_single_id_report_accepts_web_scanners(self):
+        for scanner in ("whatweb", "nikto", "ffuf", "gobuster", "dirb", "wafw00f"):
+            with self.subTest(scanner=scanner):
+                document = {"schema_version": 1, "scanner": scanner, "source_type": "host",
+                           "target_ref": "http://x", "status": "success",
+                           "findings": [{"id": "y", "Severity": "INFO", "Title": "y"}], "metadata": {}}
+                with tempfile.TemporaryDirectory() as root_text:
+                    root = Path(root_text)
+                    results = root / "results"
+                    reports = root / "reports"
+                    results.mkdir()
+                    (results / f"{'A' * 32}.json").write_text(json.dumps(document), encoding="utf-8")
+                    with (
+                        patch.object(self.server, "RESULTS_ROOT", results),
+                        patch.object(self.server, "REPORTS_ROOT", reports),
+                        patch.object(self.server.secrets, "token_urlsafe", return_value="R" * 32),
+                    ):
+                        response = asyncio.run(self.server.generate_report("A" * 32))
+                    self.assertNotIn("Error", response)
 
 
 if __name__ == "__main__":
