@@ -197,3 +197,57 @@ preserved tools).
 
 Out of scope for this wave: the other tool families (separate waves), and
 severity heuristics beyond the VULNERABLE-string rule.
+
+---
+
+## P2 wave 2 — TLS family (addendum, anchor for the wave)
+
+Scope: wire the three TLS tools to capture, per D1 (preserve text, side-channel
+structured). NO change to any tool's human-readable str return. Stacked on P2
+wave 1 (nmap); reuse its patterns.
+
+Tools: sslscan_scan, testssl_scan, sslyze_scan. Each has a distinct structured
+format, so each gets its own small parser; a shared runner handles the
+run→capture→persist plumbing (mirroring `_run_nmap_with_capture`).
+
+Structured flags (add to the existing command; stdout text stays unchanged):
+- sslscan: `--xml=<tmpfile>` (XML). Parse: weak protocol enabled (SSLv2/SSLv3/
+  TLSv1.0/TLSv1.1 with enabled="1") -> finding Severity HIGH for SSLv2/SSLv3,
+  MEDIUM for TLS1.0/1.1; accepted cipher with a weak token (RC4, 3DES, DES,
+  NULL, EXPORT, MD5) -> HIGH; each accepted cipher otherwise -> INFO. id like
+  "tls-proto-<ver>" / "tls-cipher-<name>".
+- testssl: `--jsonfile <tmpfile>` (JSON array of {id, severity, finding, cve?}).
+  testssl already grades severity — map its severity string (CRITICAL/HIGH/
+  MEDIUM/LOW/INFO/OK/WARN) to our vocabulary (OK/INFO/WARN -> INFO), id = the
+  testssl id, Title = id, evidence = finding, keep cve when present. Skip
+  entries with severity OK/INFO if noisy is a concern — but P2 keeps all,
+  mapping OK/INFO/WARN -> INFO.
+- sslyze: `--json_out <tmpfile>` (JSON). Parse accepted cipher suites per TLS
+  version from the server scan result; weak protocol/cipher -> same severity
+  rule as sslscan; otherwise INFO. Guard the nested structure defensively.
+
+Mechanism: a shared runner `_run_tls_with_capture(cmd, scanner, target, timeout,
+parse_fn, out_flag)` (or per-tool wrappers) that: creates a server-generated
+tmpfile under /tmp, appends the tool's structured-output flag pointing at it,
+runs via `run_command` and RETURNS ITS TEXT UNCHANGED, reads+parses the file
+with parse_fn, best-effort `_write_scanner_result` (swallow OSError), cleans the
+tmpfile in a finally. scanner label = the tool's own name ("sslscan"/"testssl"/
+"sslyze"). Add all three labels to the single-ID generate_report allowlist.
+
+Invariants (same as wave 1): arg-list command (no shell); the out path is
+server-generated, not caller data; parsers NEVER raise into the tool (malformed/
+empty/oversized -> zero findings); JSON parsing bounded and safe (no eval); XML
+via stdlib ElementTree with the same DOCTYPE/ENTITY guard as _parse_nmap_xml
+(reuse it or a shared guard); findings redacted via _redact_scanner_data before
+persist; 200-line public text bound and opaque ids unchanged; the 42 preserved
+tool signatures unchanged (NO fixture change).
+
+Test seams (extend tests/test_scanner_adapters.py): each parser maps a
+representative sample (sslscan XML with a weak protocol + RC4 cipher; testssl
+JSON with HIGH+OK entries; sslyze JSON with a weak cipher) to the expected
+severities; malformed/empty input -> zero findings, no raise; each tool's text
+return is unchanged vs a run_command mock; a persist failure is swallowed; the
+single-ID report accepts each new scanner.
+
+Out of scope: other tool families (later waves); deep protocol/cert analysis
+beyond the weak-protocol/weak-cipher/testssl-severity rules above.
