@@ -161,6 +161,16 @@ findings that share a scanner id.
 **Acceptance:** the 5-finding nikto case renders 5 articles; a genuine exact
 duplicate still collapses to 1.
 
+**Two carve-outs, both added during review.** `VOLATILE_FINDING_KEYS` excludes
+per-run keys from the identity (nuclei's `-jsonl` `timestamp`), and
+`RAW_TRANSCRIPT_SCANNERS` dedupes the six whole-transcript tools on identity
+alone, because their per-run noise lives INSIDE the evidence string where a
+key-level carve-out cannot reach it: whois stamps its database update time,
+`run_command`'s own truncation counter drifts with line count, and a failure
+banner carries the exit code. Without it six re-runs rendered six near-identical
+8KB cards. `amass` is deliberately excluded: its parser emits one
+content-derived finding per host.
+
 ### B2 — #38 trivy findings not normalized
 `render_findings` builds evidence from every key, so nested dicts render as
 Python reprs. **Confirmed by execution:** `CVSS` renders as
@@ -175,15 +185,20 @@ and no nested value is ever rendered as a Python repr.
 remediation slot names the fixed version; report size for a realistic
 multi-CVE result drops materially.
 
-**Size, measured.** On a 151-CVE fixture carrying `Description`, 22
-`References`, `CVSS`, `DataSource`, `Layer` and `PkgIdentifier`:
-520,715 bytes before, 390,823 after, **-24.9%**. At 40 CVEs, -12.6%. The drop
-comes from `Layer`/`PkgIdentifier`/`CVSS`/`DataSource` no longer repr-dumping.
-A thinner fixture omitting the nested keys shows a small INCREASE instead,
-because the references paragraph and the advisory-source line add back what
-promotion removed; the criterion is about realistic trivy output, which always
-carries those nested keys. Pinned by
-`tests/test_wave2_gate.py::ReportSizeTests`.
+**Size, measured, and corrected once.** On a 151-CVE fixture carrying
+`Description`, 22 `References`, `CVSS`, `DataSource`, `Layer` and
+`PkgIdentifier`: 496,549 bytes before, 440,425 after, **-11.3%**. At 40 CVEs,
++0.7%. The saving comes from `Layer`/`PkgIdentifier`/`CVSS`/`DataSource` no
+longer repr-dumping.
+
+An earlier revision of this section claimed **-24.9%**. That figure was
+inflated by a ten-item cap on the references slot, which silently dropped 12 of
+every finding's 22 references. The cap is 25 now, so all real references render
+and the honest saving is roughly half what was first recorded. A thinner
+fixture omitting the nested keys shows a small INCREASE, because the references
+paragraph and the advisory-source line add back what promotion removed; the
+criterion is about realistic trivy output, which always carries those nested
+keys. Pinned by `tests/test_wave2_gate.py::ReportSizeTests`.
 
 ## Wave 3 — `run_command` status semantics (PR B)
 

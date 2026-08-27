@@ -112,8 +112,11 @@ class ReportSizeTests(unittest.TestCase):
 
     def test_a_realistic_multi_cve_report_stays_under_its_measured_ceiling(self):
         # Measured against the pre-fix renderer on this exact fixture:
-        # 151 CVEs rendered 520,715 bytes before and 390,823 after (-24.9%),
+        # 151 CVEs rendered 496,549 bytes before and 440,425 after (-11.3%),
         # because Layer/PkgIdentifier/CVSS/DataSource no longer repr-dump.
+        # An earlier -24.9% figure was inflated by a ten-item reference cut
+        # that also dropped 12 of every finding's 22 references; the cap is 25
+        # now, so all real references render and the honest saving is smaller.
         # The ceiling is the measured figure plus headroom, so this catches a
         # regression back toward repr-dumping without pinning exact bytes.
         findings = [{
@@ -129,7 +132,54 @@ class ReportSizeTests(unittest.TestCase):
         } for i in range(151)]
         rendered = render(self.server, findings, scanner="trivy")
         self.assertEqual(151, rendered.count("<article>"))
-        self.assertLess(len(rendered), 430_000)
+        self.assertLess(len(rendered), 470_000)
+        # All 22 references survive; the earlier size win partly came from
+        # silently dropping 12 of them.
+        self.assertNotIn("(+12 more)", rendered)
+
+
+class RawTranscriptDedupeTests(unittest.TestCase):
+    """B1: whole-content dedupe re-inflated the whole-transcript family."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    def runs(self, scanner, bodies):
+        parser = self.server._raw_text_parser(scanner, "example.com")
+        return combined(self.server, [result(self.server, parser(body), scanner) for body in bodies])
+
+    def test_repeat_runs_collapse_despite_a_drifting_transcript(self):
+        # whois stamps its own "Last update of whois database" line, so six
+        # otherwise-identical lookups rendered six near-identical 8KB cards.
+        bodies = [f"✅ Scan completed successfully:\n\nDomain: example.com\n"
+                  f">>> Last update of whois database: 2026-08-27T10:0{n}:00Z <<<\n"
+                  for n in range(6)]
+        self.assertEqual(1, self.runs("whois", bodies).count("<article>"))
+
+    def test_repeat_failures_with_different_exit_codes_collapse(self):
+        bodies = [f"❌ Scan failed (exit code {n}):\n\ndo_connect: timeout\n" for n in range(1, 7)]
+        self.assertEqual(1, self.runs("smbclient", bodies).count("<article>"))
+
+    def test_a_drifting_truncation_counter_does_not_re_inflate(self):
+        # run_command's own "(truncated N additional lines)" counter moves with
+        # line count, which drifts between live runs.
+        bodies = [f"✅ Scan completed successfully:\n\nline\n\n... (truncated {n} additional lines)"
+                  for n in range(6)]
+        self.assertEqual(1, self.runs("nbtscan", bodies).count("<article>"))
+
+    def test_distinct_targets_still_render_separately(self):
+        docs = [result(self.server, self.server._raw_text_parser("whois", host)(
+            "✅ Scan completed successfully:\n\nDomain: " + host + "\n"), "whois")
+            for host in ("a.example", "b.example", "c.example")]
+        for doc, host in zip(docs, ("a.example", "b.example", "c.example")):
+            doc["target_ref"] = host
+        self.assertEqual(3, combined(self.server, docs).count("<article>"))
+
+    def test_amass_is_not_treated_as_a_transcript_scanner(self):
+        # Its parser emits one content-derived finding per host, so whole-content
+        # dedupe is correct for it.
+        self.assertNotIn("amass", self.server.RAW_TRANSCRIPT_SCANNERS)
 
 
 class CvssSelectionTests(unittest.TestCase):

@@ -662,7 +662,7 @@ Hard-failure guard: the parser returns [] when the tool's text is empty, when
 it begins with a hard-failure status marker (`❌` command error, `⏱️` timeout),
 or when a `✅`/`⚠️` banner has NO body below it. `run_command` has FOUR
 no-substance returns, not two — it also emits `✅ Command completed
-successfully (no output)` and `⚠️ Command returned exit code N` — and each of
+successfully (no output)` and `❌ Command failed with exit code N` — and each of
 those was persisting a card whose entire evidence was its own status line. A
 banner WITH a body is a real result and is captured, including a non-zero exit
 that still printed. This is a local guard for the raw parser only; the
