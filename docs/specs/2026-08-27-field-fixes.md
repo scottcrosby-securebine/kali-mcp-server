@@ -51,6 +51,9 @@ The repo's existing convention, unchanged:
 - **Each wave agent writes its tests to its own new file,
   `tests/test_issue_<N>.py`.** No agent appends to an existing test file.
   This keeps the test-side merge surface at zero.
+- Regressions found by a REVIEW rather than by an issue go in
+  `tests/test_wave<N>_gate.py`, since they span several issues and belong to
+  no single one.
 - `tests/fixtures/legacy_tool_contract.json` MUST NOT change in wave 1 or
   wave 2. Wave 3 (#31) may change only what D1 authorizes.
 
@@ -111,6 +114,13 @@ Expanding the promoted template set is **out of scope** — that is #25.
 **Acceptance:** tests cover a zero-template selection and assert the message
 names the severity and the set size and contains no banner art.
 
+**Two further changes to the same error path, added during review.** The
+stripper runs BEFORE stderr-or-stdout is chosen (a banner-only stderr is
+truthy, so it used to win over a real message on stdout and then strip away to
+nothing), and an empty detail names the exit code instead of returning
+`Nuclei scan failed:` with nothing after the colon. Both pinned in
+`tests/test_wave1_gate.py`.
+
 ### A4 — #36 `web_headers` scheme and port
 `kali_pentest_server.py:1923`. A bare host is forced to `http://`, so an
 HTTPS service is never audited; `host:port` sends HTTP to :443 and returns
@@ -139,6 +149,11 @@ rejected and neither the docstring nor the error names the valid set.
 syft. Docstrings name them too. Docstrings stay **one line** — the MCP client
 shows that line verbatim.
 
+**Widened during review, disclosed rather than silent.** `syft`'s `format`
+rejection has the identical gap (`SYFT_FORMATS` is undiscoverable, and `table`
+is as natural a wrong guess as `image`), so it got the same treatment. That is
+one field beyond what this section asked for.
+
 **Acceptance:** tests assert the rejection message contains every accepted
 value for both tools.
 
@@ -157,6 +172,13 @@ exactly, including fuzzing a non-path position.
 
 **Acceptance:** tests cover bare host, base URL with and without a trailing
 slash, and an explicit-FUZZ target in a query-parameter position.
+
+**One exemption, added during review.** A bracket-malformed target
+(`x[y]z`, `http://[127.0.0.1]/app?q=1`) makes `urlsplit` raise, and is returned
+UNCHANGED for the scanner to refuse rather than fuzzed. Appending to it would
+place FUZZ after any query, which is the defect this section exists to fix, and
+ffuf's Go parser accepts a bracketed host so it would have run and fuzzed the
+query value. Pinned by `tests/test_wave1_gate.py::FuzzTargetRobustnessTests`.
 
 ## Wave 2 — renderer (PR B)
 
