@@ -1379,14 +1379,25 @@ class RawTextCaptureTests(unittest.TestCase):
                     text = asyncio.run(getattr(self.server, tool)(argument))
                     self.assertIn("must not begin with", text)
                     self.assertEqual({}, seen)  # never executed
-            # msfconsole's own search flags still work.
+            # msfconsole is exempt from the PROCESS-argv dash guard
+            # (guard_target=False: the value is one -x token), and this test's
+            # name is about that. But #58 added a msfconsole-CONTENT guard: an
+            # option-shaped token is a search/info OPTION, not a term, and
+            # `search -o <path>` was a caller-named file write. So an option
+            # token is now rejected there -- NOT by the process guard (the
+            # distinction this test draws still holds), by the content guard.
+            for tool, argument in (("metasploit_search", "-t exploit ms17_010"),
+                                   ("metasploit_info", "-h")):
+                with self.subTest(tool=tool):
+                    seen.clear()
+                    text = asyncio.run(getattr(self.server, tool)(argument))
+                    self.assertNotIn("must not begin with", text)  # not the process guard
+                    self.assertIn("option-like", text)             # the content guard
+                    self.assertEqual({}, seen)                     # never executed
+            # A legitimate search still reaches msfconsole unchanged.
             seen.clear()
-            text = asyncio.run(self.server.metasploit_search("-t exploit ms17_010"))
-            self.assertNotIn("must not begin with", text)
-            self.assertEqual(["msfconsole", "-q", "-x", "search -t exploit ms17_010; exit"], seen["argv"])
-            seen.clear()
-            asyncio.run(self.server.metasploit_info("-h"))
-            self.assertEqual(["msfconsole", "-q", "-x", "info -h; exit"], seen["argv"])
+            asyncio.run(self.server.metasploit_search("type:exploit ms17_010"))
+            self.assertEqual(["msfconsole", "-q", "-x", "search type:exploit ms17_010; exit"], seen["argv"])
 
     # A capture failure must never fail a completed scan.
     def test_capture_failure_leaves_the_scan_text_intact(self):

@@ -32,29 +32,53 @@ msfconsole core exposes `irb -e <ruby>` (arbitrary Ruby -> process execution),
 than search. Bounded by the hardened container (non-root, cap-drop, read-only
 root, no raw sockets), but it is untrusted-string-controls-console-commands.
 
-## Why NOT put this in `validate_target` or the dash guard
+## Two vectors, and where the guard belongs
 
-These two tools are intentionally exempt from the leading-dash guard
-(`guard_target=False`) because a leading `-` is msfconsole's own search syntax.
-That exemption is correct FOR A LEADING DASH and must stay. `;` is not search
-syntax; it is a command separator. The fix is orthogonal to the dash guard and
-must not touch it.
+These two tools are exempt from the PROCESS-argv leading-dash guard
+(`guard_target=False`) because the value is interpolated into ONE `-x` token, so
+a leading dash is not a process option. That exemption is about argv and stays.
+
+But it says nothing about what msfconsole then does with the token, and there
+are two injection vectors inside the `-x` string:
+
+1. **Command chaining.** `;` or a newline appends a console command; `irb -e
+   <ruby>` is RCE.
+2. **Acting options (found by the red team, F1).** A token beginning with `-` is
+   a msfconsole SEARCH/INFO OPTION, not a term. `search -o <path>` writes a CSV
+   to a caller-named path -- a file write through what looked like a search.
+   `metasploit_search("-o /tmp/x.csv eternalblue")` built
+   `search -o /tmp/x.csv eternalblue; exit` and passed the first-cut guard.
+
+The original framing of this spec -- "a leading dash is msfconsole's own search
+syntax... not an option that acts" -- was WRONG for `-o`. Both vectors are
+msfconsole-command-level and are guarded in `_reject_msf_injection`, separate
+from the process-argv guard, which is untouched.
 
 ## Fix
 
-Add `_reject_msf_command_chars(value, noun)`: reject a value containing `;`,
-`\n`, or `\r` before it reaches the `-x` string. Apply in both tools after the
-empty-check. The leading dash stays allowed.
+`_reject_msf_injection(value, noun)`, applied in both tools after the
+empty-check, rejects:
 
-**Reject-list, not allowlist, deliberately.** The command boundary in an `-x`
-string is `;` (and a newline in resource-file contexts). A legitimate search
-(`type:exploit platform:windows cve:2021-44228 eternalblue`) and a module path
-(`exploit/windows/smb/ms17_010_eternalblue`) never contain those three
-characters, so a reject-list closes the injection with zero false rejects. An
-allowlist (`[A-Za-z0-9 :/_.,*-]`) is more paranoid but would reject legitimate
-free-text terms (an apostrophe in an author name, parentheses), trading a real
-usability cost for no security gain over blocking the separator. If a future
-finding shows another msfconsole separator, add it to the reject set.
+- any value containing `;`, `\n`, or `\r` (command chaining);
+- any whitespace-delimited token beginning with `-` (an acting option).
+
+**Reject the shape, not a denylist of flags.** For the separators: `;` is the
+`-x` command boundary and a legit search never contains it, so a reject-list is
+zero-false-reject (newline rejected as defence-in-depth for resource-file
+contexts). For the options: the acting flags (`-o` today) are a MOVING denylist,
+so reject the option SHAPE instead -- a real query is `key:value` or free text
+and never starts a token with `-`, while an internal dash (`cve:2021-44228`,
+`apache-struts`) is fine because the token starts with a letter. This closes
+`-o` and any future acting flag at once.
+
+**Interaction with wave 5, named rather than silent.** Wave 5 set
+`guard_target=False` and a test asserted "msfconsole's own search flags still
+work". That observable behaviour is now REVERSED: an option-shaped query is
+rejected. The reversal is correct -- those flags were the `-o` hole -- and the
+process-argv exemption itself is unchanged; only the msfconsole-content rule is
+new. The wave-5 test (`test_leading_dash_guard_applies_only_where_the_target_reaches_argv`)
+is updated to assert the option token is rejected by the CONTENT guard, not the
+process guard, preserving its structural point.
 
 ## Acceptance
 
@@ -62,8 +86,10 @@ finding shows another msfconsole separator, add it to the reject set.
   return `❌ Error` and spawn nothing; same for `metasploit_info`.
 - A legitimate search (`type:exploit cve:2021-44228`) and a legitimate module
   path still reach msfconsole unchanged.
-- A leading-dash input (`-x type:exploit`) still reaches msfconsole — the
-  documented exemption is intact.
+- An option-shaped query (`-o /tmp/x`, `-S`, `-h`) returns `❌ Error` and spawns
+  nothing; it is rejected by the content guard, NOT by the process-argv guard
+  (`guard_target=False` is intact).
+- An internal dash (`cve:2021-44228`, a module path) still reaches msfconsole.
 
 ## Invariants
 

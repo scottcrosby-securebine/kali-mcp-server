@@ -75,16 +75,40 @@ class MsfConsoleInjectionTests(unittest.TestCase):
         self.assertEqual("text", out)
         self.assertEqual(f"info {value}; exit", spawned[0][-1])
 
-    def test_the_leading_dash_exemption_is_intact(self):
-        # A leading dash is msfconsole search syntax, not a separator; #58 must
-        # not regress the guard_target=False exemption.
-        for tool, value in [("metasploit_search", "-x type:exploit"),
-                            ("metasploit_info", "-x")]:
-            with self.subTest(tool=tool):
-                out, spawned = self.run_tool(tool, value)
-                self.assertNotIn("must not contain", out)
-                self.assertEqual(1, len(spawned))
-                self.assertIn(value, spawned[0][-1])
+    def test_option_like_tokens_are_rejected(self):
+        # A leading-dash token is a msfconsole SEARCH/INFO option, not a term.
+        # search -o <path> writes a CSV to a caller-named path (found by the
+        # red team). The acting options are a moving denylist, so the whole
+        # option shape is rejected -- but only where the dash STARTS a token;
+        # an internal dash (a CVE) is fine.
+        cases = {
+            "metasploit_search": ["-o /tmp/x.csv eternalblue", "apache -S",
+                                  "-x type:exploit", "-h", "type:exploit -o/tmp/y"],
+            "metasploit_info": ["-d", "exploit/x -o /tmp/z"],
+        }
+        for tool, values in cases.items():
+            for value in values:
+                with self.subTest(tool=tool, value=value):
+                    out, spawned = self.run_tool(tool, value)
+                    self.assertIn("option-like", out)
+                    self.assertEqual([], spawned)
+
+    def test_an_internal_dash_is_not_an_option_token(self):
+        # cve:2021-44228 and module paths carry dashes mid-token; those pass.
+        for value in ("cve:2021-44228", "type:exploit apache-struts"):
+            out, spawned = self.run_tool("metasploit_search", value)
+            self.assertEqual("text", out)
+            self.assertEqual(1, len(spawned))
+
+    def test_process_argv_dash_exemption_is_structurally_intact(self):
+        # guard_target=False stays: the value is one -x token, so a leading dash
+        # is not a PROCESS option. The msfconsole-content guard above is what now
+        # rejects it, not _run_with_capture's process guard. Confirm the tools
+        # still pass guard_target=False (a dash reaches OUR guard, with our
+        # message, not _run_with_capture's "target must not begin with '-'").
+        out, _ = self.run_tool("metasploit_search", "-o /tmp/x")
+        self.assertIn("option-like", out)
+        self.assertNotIn("target must not begin", out)
 
 
 if __name__ == "__main__":
