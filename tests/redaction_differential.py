@@ -13,6 +13,7 @@ it. Run it directly; the exit status is the gate.
 
 import argparse
 import importlib.util
+import itertools
 import json
 import subprocess
 import sys
@@ -24,7 +25,9 @@ sys.path.insert(0, str(REPO))
 
 from server_test_support import load_server  # noqa: E402  (needs REPO on sys.path)
 
-BASE_COMMIT = "b3ca7e1"
+# The revision this change is measured against. Overridable, because a gate that
+# hardcodes one commit silently compares against an ever-staler base as main moves.
+DEFAULT_BASE = "b3ca7e1"
 
 
 def _load(path, name):
@@ -157,6 +160,36 @@ CORPUS = [
 ]
 CORPUS += [(f"ported-url-{label}", PORTED + tail, (), ("portsafe.example:8443",))
            for label, tail in TERMINATORS.items()]
+# The corpus reported zero regressions on a revision that leaked in 152 shapes,
+# because it carried no keyword-introduced URL and no bracketed userinfo. Both
+# are here now. A fixed corpus only ever measures what someone thought to write
+# down, which is why `sweep` below exists beside it.
+CORPUS += [
+    ("keyword-value-is-a-plain-url", "password: http://svc.example/cb?k=KWURLLEAK", ("KWURLLEAK",), ()),
+    ("keyword-value-is-a-vault-url", "api_key: https://vault.example/s/KWVAULTLEAK", ("KWVAULTLEAK",), ()),
+    ("keyword-value-is-a-credential-url", "token: https://svc:KWCREDLEAK@host.example/x", ("KWCREDLEAK",), ()),
+    ("bracket-in-userinfo", "https://us[er:BRACKETLEAKA@host.example/x", ("BRACKETLEAKA",), ()),
+    ("close-bracket-in-userinfo", "https://us]er:BRACKETLEAKB@host.example/x", ("BRACKETLEAKB",), ()),
+]
+
+# Every shape the sweep below builds. A secret that survives HEAD but not BASE is
+# a regression whatever the combination, so this does not depend on anyone having
+# imagined the combination first.
+SWEEP_TOKEN = "ZQSWEEPZQ"
+SWEEP_KEYWORDS = ("", "password: ", "api_key: ", "token: ", "authorization: ",
+                  "secret=", "Set-Cookie: session=", "cookie: ")
+SWEEP_BODIES = (
+    f"http://svc.example/cb?k={SWEEP_TOKEN}", f"https://vault.example/s/{SWEEP_TOKEN}",
+    f"https://svc:{SWEEP_TOKEN}@host/x", f"https://svc:{SWEEP_TOKEN}",
+    f"https://us[er:{SWEEP_TOKEN}@host/x", f"https://us]er:{SWEEP_TOKEN}@host/x",
+    f"ftp://u:{SWEEP_TOKEN}@h/x", f"eyJhbGciOiJIUzI1NiJ9.{SWEEP_TOKEN}",
+    f"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhIn0.{SWEEP_TOKEN}",
+    f"-----BEGIN PRIVATE KEY-----\n{SWEEP_TOKEN}",
+    f"-----BEGIN PRIVATE KEY-----\n{SWEEP_TOKEN}\n-----END PRIVATE KEY-----",
+    f"Bearer {SWEEP_TOKEN}", f"Basic {SWEEP_TOKEN}", f"ghp_{SWEEP_TOKEN}AAAAAAAAAAAAAAAAAAAA",
+    f"?access_token={SWEEP_TOKEN}", SWEEP_TOKEN,
+)
+SWEEP_TAILS = ("", "\nName Server: NS1", " trailing text", "\n")
 
 BUCKETS = {
     "LEAK CLOSED": "closed", "LEAK OPENED": "opened",
@@ -207,6 +240,33 @@ def run(base, head):
     return rows
 
 
+def sweep(base, head):
+    """Every combination, not just the ones someone wrote down.
+
+    The corpus above is a fixed list, so it can only catch a regression in a
+    shape its author already imagined -- and the first attempt at this fix
+    passed it while leaking in 152 combinations. This walks the product of
+    keyword prefix, secret body and trailing text through the composed public
+    path and reports any token BASE removed that HEAD leaves behind. It is the
+    mechanical check for that whole class rather than for two instances of it.
+    """
+    def path(module, text):
+        return module._clip(module._safe_scanner_value(text), module.MAX_EVIDENCE_CHARS)
+
+    leaked = []
+    for keyword, body, tail in itertools.product(SWEEP_KEYWORDS, SWEEP_BODIES, SWEEP_TAILS):
+        text = keyword + body + tail
+        if SWEEP_TOKEN not in path(base, text) and SWEEP_TOKEN in path(head, text):
+            leaked.append((keyword, body, tail))
+    total = len(SWEEP_KEYWORDS) * len(SWEEP_BODIES) * len(SWEEP_TAILS)
+    print(f"\nSWEEP: {total} combinations, {len(leaked)} leak on head that base redacted")
+    for keyword, body, tail in leaked[:20]:
+        print(f"  {keyword!r} + {body!r} + {tail!r}")
+    if len(leaked) > 20:
+        print(f"  ... and {len(leaked) - 20} more")
+    return leaked
+
+
 def report(rows):
     width = max(len(name) for name in rows)
     header = f"{'parser'.ljust(width)}  base  head  " + "  ".join(
@@ -244,23 +304,28 @@ def report(rows):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", help="write the full classified result here")
+    parser.add_argument("--base", default=DEFAULT_BASE,
+                        help=f"revision to measure against (default {DEFAULT_BASE})")
     args = parser.parse_args()
 
     load_server()  # reuse the repo's FastMCP stub install; its module is discarded
     with tempfile.TemporaryDirectory() as tmp:
         base_path = Path(tmp) / "base_kali_pentest_server.py"
         base_path.write_bytes(subprocess.run(
-            ["git", "show", f"{BASE_COMMIT}:kali_pentest_server.py"],
+            ["git", "show", f"{args.base}:kali_pentest_server.py"],
             cwd=REPO, check=True, stdout=subprocess.PIPE).stdout)
         base = _load(base_path, "kali_pentest_server_base")
     head = _load(REPO / "kali_pentest_server.py", "kali_pentest_server_head")
-    print(f"base={BASE_COMMIT}  head={REPO / 'kali_pentest_server.py'}\n")
+    print(f"base={args.base}  head={REPO / 'kali_pentest_server.py'}\n")
 
     rows = run(base, head)
     status = report(rows)
+    leaked = sweep(base, head)
+    status = status or (1 if leaked else 0)
     if args.json:
         Path(args.json).write_text(json.dumps(
-            {"base_commit": BASE_COMMIT, "exit_status": status, "parsers": rows},
+            {"base_commit": args.base, "exit_status": status,
+             "sweep_leaks": leaked, "parsers": rows},
             indent=2, sort_keys=True), encoding="utf-8")
     return status
 

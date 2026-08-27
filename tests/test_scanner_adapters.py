@@ -1328,6 +1328,19 @@ class RawTextCaptureTests(unittest.TestCase):
         # X2: the port tail was never range checked, so an all-numeric
         # password passed itself off as a port.
         ("an out-of-range numeric password is not a port", "https://svc:98765", "98765"),
+        # C1/C2, both introduced by the first attempt at this fix and caught by
+        # review, not by the suite. A keyword value that is an ordinary URL must
+        # still be redacted whole -- stopping the value at any bare `scheme://`
+        # left it in the clear -- and a bracket inside the userinfo must not let
+        # a credential escape the pattern that exists to catch it.
+        ("a keyword whose value is a plain URL",
+         "password: http://svc.example/cb?k=SECRETVAL1", "SECRETVAL1"),
+        ("a keyword whose value is a vault URL",
+         "api_key: https://vault.example/s/SECRETVAL2", "SECRETVAL2"),
+        ("a credential with a bracket in the userinfo",
+         "https://us[er:PASSWORD1@host.example/x", "PASSWORD1"),
+        ("a credential with a close bracket in the userinfo",
+         "https://us]er:PASSWORD2@host.example/x", "PASSWORD2"),
     )
     REDACTION_MUST_KEEP = (
         ("a plain whois record",
@@ -1346,15 +1359,25 @@ class RawTextCaptureTests(unittest.TestCase):
         # --- #27. Every row below was DESTROYED on main. ---
         # H3: the port tail accepted only `/ ? #` or end-of-string, so a
         # legitimate ported URL before any other character was read as an
-        # orphan and everything from the URL onward was cut.
-    ) + tuple(
-        (f"a ported URL terminated by {name}", f"see https://host:8443{tail} then check log", "then check log")
-        for name, tail in (("a double quote", '"'), ("a single quote", "'"), ("a comma", ","),
-                           ("a semicolon", ";"), ("a paren", ")"), ("a bracket", "]"),
-                           ("a space", " "), ("a serialized newline", "\\n"), ("a real newline", "\n"))
-    ) + (
-        # Same defect: the opener fired on `[2001:` inside the IPv6 literal and
-        # the region after it can never look like a port.
+        # orphan and everything from the URL onward was cut. One row per
+        # terminator the pattern accepts, written out rather than generated:
+        # the generated form drifted from the pattern immediately, leaving `}`
+        # and the tab accepted by the code and pinned by nothing.
+        ("a ported URL then a slash", "see https://host:8443/x then check log", "then check log"),
+        ("a ported URL then a query", "see https://host:8443?a=1 then check log", "then check log"),
+        ("a ported URL then a fragment", "see https://host:8443#top then check log", "then check log"),
+        ("a ported URL then a double quote", 'see https://host:8443" then check log', "then check log"),
+        ("a ported URL then a single quote", "see https://host:8443' then check log", "then check log"),
+        ("a ported URL then a comma", "see https://host:8443, then check log", "then check log"),
+        ("a ported URL then a semicolon", "see https://host:8443; then check log", "then check log"),
+        ("a ported URL then a paren", "see https://host:8443) then check log", "then check log"),
+        ("a ported URL then a bracket", "see https://host:8443] then check log", "then check log"),
+        ("a ported URL then a brace", "see https://host:8443} then check log", "then check log"),
+        ("a ported URL then a space", "see https://host:8443 then check log", "then check log"),
+        ("a ported URL then a tab", "see https://host:8443\tthen check log", "then check log"),
+        ("a ported URL then a serialized newline",
+         "see https://host:8443\\n then check log", "then check log"),
+        ("a ported URL then a real newline", "see https://host:8443\n then check log", "then check log"),
         ("an IPv6 URL with a port", "https://[2001:db8::1]:8443/status", "db8::1]:8443"),
         # H4/X3: redaction kept the secret's own opener as the `\\1` of
         # `\\1[REDACTED]`, the guard rematched it, found no closer, and

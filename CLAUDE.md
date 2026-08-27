@@ -21,6 +21,21 @@ python3 kali_pentest_server.py          # host: needs `pip install -r requiremen
 # Run the native contract, adapter, report, launcher, registry, and browser tests
 python3 -m unittest discover -s tests -v
 
+# Redaction gate. NOT collected by unittest discover -- run it directly, and read
+# the EXIT STATUS, not the last line of output (a launcher test prints a docker
+# line after `OK`). Fails on a leak opened, on legitimate content destroyed, on a
+# parser the corpus never exercised, and on any sweep combination the base
+# redacted and HEAD does not. Pass --base after this branch merges.
+python3 tests/redaction_differential.py [--base <rev>] [--json out.json]
+
+# Mutation check for the redaction gate: the new assertions must FAIL against the
+# revision they were written for. Reads the runner's exit status for the same
+# reason as above.
+git show <base-rev>:kali_pentest_server.py > /tmp/base.py && cp kali_pentest_server.py /tmp/head.py \
+  && cp /tmp/base.py kali_pentest_server.py && find . -name __pycache__ -type d -exec rm -rf {} + \
+  && python3 -m unittest discover -s tests -p "test_scanner_adapters.py"; echo "want non-zero: $?" \
+  ; cp /tmp/head.py kali_pentest_server.py && find . -name __pycache__ -type d -exec rm -rf {} +
+
 # Verify a built image under the required NNP boundary
 docker run --rm --security-opt=no-new-privileges \
   --entrypoint verify-kali-mcp-image kali-mcp-server:latest
@@ -34,6 +49,8 @@ scripts/update-nuclei-templates --source /path/to/upstream \
   --destination /new/staging/directory --version UPSTREAM_VERSION \
   http/cves/example.yaml
 ```
+
+Always clear `__pycache__` between the steps of a mutation check. A restore that rewrites the same byte count inside one second reproduces the source mtime, so Python runs the MUTATED bytecode while the source reads clean.
 
 Container CI builds `linux/amd64` and `linux/arm64`, runs the image verifier, and exercises the hermetic MCP/container integration seam. QEMU arm64 CI is not physical Apple Silicon qualification; do not publish a claim that Docker Desktop qualification is complete until real Darwin/arm64 evidence exists. `python3 kali_pentest_server.py` on the host needs the Python dependencies plus the Kali binaries on `PATH`; the container is the reliable environment.
 
