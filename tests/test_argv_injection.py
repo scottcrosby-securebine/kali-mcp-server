@@ -33,6 +33,7 @@ class LeadingDashGuardTests(unittest.TestCase):
 
         with (
             patch.object(self.server, "run_command", fake_run),
+            patch.object(self.server, "execute_command", fake_exec),
             patch.object(self.server, "_capture_findings", lambda *a, **k: None),
         ):
             out = asyncio.run(getattr(self.server, tool)(*args))
@@ -45,6 +46,7 @@ class LeadingDashGuardTests(unittest.TestCase):
         ("searchsploit_search", ("-h",)),
         ("wfuzz_scan", ("-x/FUZZ",)),           # FUZZ present, still dash-led
         ("hydra_attack", ("-U", "ssh", "admin", "/etc/hostname")),
+        ("dns_enum", ("-f/etc/hostname",)),   # dig -f<path> is batch-file mode
     ]
 
     def test_a_dash_leading_positional_is_rejected_and_spawns_nothing(self):
@@ -109,7 +111,7 @@ class HydraServiceAllowlistTests(unittest.TestCase):
             return "text"
 
         with (
-            patch.object(self.server.os.path, "exists", return_value=True),
+            patch.object(self.server.os.path, "isfile", return_value=True),
             patch.object(self.server, "run_command", fake_run),
         ):
             out = asyncio.run(self.server.hydra_attack("10.0.0.1", service, "admin", "/tmp/wl"))
@@ -158,7 +160,7 @@ class HydraWordlistTests(unittest.TestCase):
             return "text"
 
         with (
-            patch.object(self.server.os.path, "exists", return_value=path_exists),
+            patch.object(self.server.os.path, "isfile", return_value=path_exists),
             patch.object(self.server, "run_command", fake_run),
         ):
             out = asyncio.run(self.server.hydra_attack("10.0.0.1", "ssh", "admin", password_list))
@@ -176,6 +178,23 @@ class HydraWordlistTests(unittest.TestCase):
         self.assertNotIn("rockyou", out)
         self.assertNotIn("dirb", out)
         self.assertEqual([], spawned)
+
+    def test_a_directory_or_device_wordlist_is_rejected(self):
+        # os.path.exists accepted /tmp (a directory) and /dev/zero (an infinite
+        # stream); the guard now requires a regular file.
+        import os.path
+        real_isfile = os.path.isfile
+        for path, isfile in (("/tmp", False), ("/dev/zero", False)):
+            with self.subTest(path=path):
+                spawned = []
+                with (
+                    patch.object(self.server.os.path, "isfile", lambda p, _f=isfile: _f),
+                    patch.object(self.server, "run_command",
+                                 lambda cmd, timeout=None, **k: spawned.append(list(cmd)) or "text"),
+                ):
+                    out = asyncio.run(self.server.hydra_attack("10.0.0.1", "ssh", "admin", path))
+                self.assertIn("not found or not a file", out)
+                self.assertEqual([], spawned)
 
     def test_an_existing_wordlist_is_used_verbatim(self):
         out, spawned = self.run_hydra("/mnt/custom.txt", path_exists=True)

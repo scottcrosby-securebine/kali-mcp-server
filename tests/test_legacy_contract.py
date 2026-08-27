@@ -260,6 +260,7 @@ class LegacyToolContractTests(unittest.TestCase):
             with (
                 self.subTest(tool=name),
                 patch.object(self.server.os.path, "exists", return_value=True),
+                patch.object(self.server.os.path, "isfile", return_value=True),
                 patch.object(
                     self.server,
                     "run_command",

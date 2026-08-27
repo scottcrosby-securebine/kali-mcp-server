@@ -14,8 +14,10 @@ reaching a tool's argv as an option token (CWE-88).
 ## The root cause
 
 The leading-dash rejection that stops a target being read as an option is
-written THREE times (`_run_with_capture` guard_target, `_validate_registry_reference`,
-`sslscan_scan` inline) but is NOT in `validate_target`, which every tool calls.
+written twice (`_run_with_capture` guard_target, `_validate_registry_reference`)
+but is NOT in `validate_target`, which every tool calls. #50's issue text also
+named an `sslscan_scan` inline guard; that is wrong -- sslscan inherits the guard
+from `_run_with_capture` like every other capturing tool.
 So protection depends on which execution path a tool happens to use.
 
 ## The trap that makes #50's own suggested fix wrong
@@ -37,8 +39,11 @@ stays intact by simply not calling the new helper.
 Add `reject_option_like(value) -> bool` (or a small validating wrapper). Apply
 it in the six tools that call `run_command` with a positional target unguarded:
 `enum4linux_scan`, `crackmapexec_scan`, `hydra_attack`, `john_crack`,
-`hashcat_crack`, `searchsploit_search` — plus `wfuzz_scan` (#42), whose target
-reaches wfuzz as a bare positional through `run_command`, not `_run_with_capture`.
+`hashcat_crack`, `searchsploit_search`, `dns_enum` (three argv lists — nslookup,
+dig, host — missed on the first pass and caught by the red team) — plus
+`wfuzz_scan` (#42), whose target reaches wfuzz as a bare positional through
+`run_command`. hashcat's `wordlist` positional is option-shaped like its
+`hash_file`, so it is guarded too.
 
 Each returns `❌ Error: target must not begin with '-'` (the exact string the
 other guards already use) before building argv.
