@@ -229,7 +229,10 @@ Structured flags (add to the existing command; stdout text stays unchanged):
 Mechanism: a shared runner `_run_tls_with_capture(cmd, scanner, target, timeout,
 parse_fn, out_flag)` (or per-tool wrappers) that: creates a server-generated
 tmpfile under /tmp, appends the tool's structured-output flag pointing at it,
-runs via `run_command` and RETURNS ITS TEXT UNCHANGED, reads+parses the file
+runs via `run_command` and returns the text the operator would have seen from
+the same scan WITHOUT capture (see the wave-4 addendum: identical bytes, which
+for a tool that announces its output file means that line is stripped before the
+200-line bound), reads+parses the file
 with parse_fn, best-effort `_write_scanner_result` (swallow OSError), cleans the
 tmpfile in a finally. scanner label = the tool's own name ("sslscan"/"testssl"/
 "sslyze"). Add all three labels to the single-ID generate_report allowlist.
@@ -294,7 +297,14 @@ tools (gobuster/dirb) get a text parser, not XML/JSON. Add all seven labels to
 the single-ID generate_report allowlist. Keep each tool's validation
 (incl. wordlist checks), command construction, and str return EXACTLY as-is
 except routing through the runner and adding the output flag. Text output
-byte-unchanged (flags write to a file, not stdout — VERIFY).
+byte-unchanged.
+
+**CORRECTED after wave 4.** The "VERIFY" above was never discharged, and one of
+these seven fails it: ffuf prints an "Output file" AND a "File format" line to
+**stderr** whenever `-o` is set (`pkg/output/stdout.go:82-94,483-484`), and
+`run_command` merges stderr. Writing to a file is not sufficient on its own; a
+tool can also announce that it is doing so. ffuf is handled by the `announces`
+mechanism in the wave-4 addendum below.
 
 Invariants (same as prior waves): arg-list command (no shell); the out path is
 server-generated, not caller data; parsers NEVER raise (bad input -> []);
@@ -305,8 +315,176 @@ the 42 preserved tool signatures unchanged (NO fixture change).
 
 Test seams (extend tests/test_scanner_adapters.py): each parser maps a
 representative sample to the expected findings/severity; malformed/empty/hostile
-input -> [] no raise; each tool's text return unchanged vs a run_command mock;
-the single-ID report accepts each new scanner. Mock run_command; no real binaries.
+input -> [] no raise; the single-ID report accepts each new scanner. No real
+binaries.
+
+**CORRECTED after wave 4.** "text return unchanged vs a `run_command` mock" is
+not a valid seam: the announcement strip and the 200-line bound both live
+*inside* `run_command`, so mocking it asserts only that the runner passes a
+string through. Text-equality tests mock `execute_command` and compare a
+captured run against an unflagged one.
 
 Out of scope: the DNS/recon family and the raw-text tail (later waves); deep
 per-tool analysis beyond the mappings above.
+
+---
+
+## P2 wave 4 — DNS/recon family (addendum, anchor for the wave)
+
+Scope: wire the three DNS/recon tools that emit a single structured file to
+capture, per D1. Stacked on wave 3; reuse `_run_with_capture`, `_load_json`,
+the never-raise discipline.
+
+Tools + flag + parser (each returns [] on bad input, never raises; findings
+redacted; normalize to id/Title/Severity/evidence — all INFO, these are
+enumeration/disclosure results):
+- dns_recon (dnsrecon): `-j <file>` (JSON array of {type,name,address,...}).
+  Each record -> INFO {id:"dns-<type>-<name>", Title:"<type> <name> <address>",
+  evidence}. Tolerate a top-level list or a dict wrapping a list.
+- subfinder_scan: plain `-o <file>` (one host per line). Each line -> INFO
+  {id:"subdomain-<host>", Title:host}. NOT `-oJ`: that flag sets `options.JSON`,
+  which feeds the single `NewOutputWriter` used for *every* writer in
+  `pkg/runner/enumerate.go`, stdout included, so it reformats the operator's
+  text. Plain `-o` appends the file to the writer list and leaves stdout alone
+  (`pkg/runner/runner.go:90` sets `outputs := []io.Writer{r.options.Output}`,
+  which `options.go` points at `os.Stdout`; `runner.go:143-149` appends the file).
+  No `evidence:source` field: plain output carries no source.
+- amass_enum: NO structured-output flag, because none exists. The v3 `-json`
+  flag was removed: v3.23.3 registers it at `cmd/amass/enum.go:154`, v4.2.0
+  keeps only the unregistered `JSONOutput` struct field in that same file, and
+  by v5.1.1 the CLI moved to `internal/enum/cli.go` where the dead field
+  survives at line 79. `-oA` is registered (cli.go:132) but read nowhere in the
+  enum package. Passing `-json` makes the flag parser reject it; amass catches
+  the error itself and prints a hint plus the raw `flag provided but not
+  defined: -json` to stderr via `color.Error`, then calls `os.Exit(1)`
+  (`internal/enum/cli.go:349-376`; the flagset uses `flag.ContinueOnError` with
+  `fs.SetOutput`, so the flag package's own usage text is buffered and shown
+  only for `-h`). `run_command` merges stderr, so that reaches the operator's
+  text — a guaranteed text-invariant violation on every call. amass v5 `enum` prints
+  one asset per line under `<type>:` headers to stdout and keeps assets in its
+  engine DB. Findings carry no `evidence` field: the printed line is a bare
+  asset token with nothing else on it. (The printing loop is `printScope`,
+  reporting the session's
+  scoped assets rather than an enumeration result set.) Capture parses the
+  tool's own text with `out_args=None`.
+  (Separately, amass still fails under the hardened runtime per issue #15.)
+
+No JSONL remains in this wave: subfinder's plain `-o` is one host per line and
+amass v5 prints bare asset tokens under `<type>:` headers, so both are parsed as
+plain text, line by line, a bad line skipped.
+
+Mechanism: route the three tools through `_run_with_capture` with scanner labels
+dns_recon/subfinder/amass. Keep each tool's validation, command construction and
+str return EXACTLY as-is. dns_recon and subfinder pass out_args + suffix; amass
+passes `out_args=None`, adding nothing to argv. Text output byte-unchanged. Add
+the three labels to the single-ID generate_report allowlist.
+
+Three mechanisms were added in this wave, all required to keep the
+byte-unchanged and redaction invariants true rather than merely asserted. Only
+the first is a `_run_with_capture` behaviour; the second lives in the parsers
+and the third in `run_command`:
+
+1. **No-flag mode (`out_args is None`).** For a tool with no per-run structured
+   output, nothing is added to argv and parse_fn reads the tool's own text. Text
+   equality is then true by construction. Note the text it parses has already
+   been cut to the 200-line public bound, so assets past that line are not
+   captured -- acceptable for best-effort capture, recorded here so it is not
+   mistaken for a parser bug.
+2. **Truncation-safe redaction.** Redaction must run before any slice that
+   would cut a pattern's trailing anchor, but a hostile artifact can hand the
+   regex engine megabytes, so values are bounded to `MAX_REDACT_CHARS` first.
+   That bound is itself a truncation, and the ATTACKER chooses the distance to
+   the anchor, so no bound is "far enough": a private-key body longer than the
+   cap would keep its `-----BEGIN` and lose its `-----END`. Every kept field
+   therefore goes through `_clip`, which slices and then redacts any secret
+   opener left without its closer. THREE patterns need a trailing anchor and
+   all three are covered: the private key needs its `-----END-----`, the URL
+   credential its `@`, the JWT its signature segment. Each is matched at its
+   LAST opener, since a value can hold a complete secret followed by a
+   truncated one. `_safe_scanner_value(value)` is the single named
+   bound-then-redact entry point; callers slice its result through `_clip`,
+   never with a bare slice. This covers the `MAX_REDACT_CHARS` bound and each
+   field's own cap with one rule, and applies to EVERY finding-producing parser,
+   including the wave 1-3 and P1 parsers already on main; a structural test
+   discovers parsers by introspection so a new one cannot be forgotten.
+
+   Two traps the guard has to avoid, both found by review after it shipped:
+   `scheme://host:8080` has the same shape as `scheme://user:pass@` up to the
+   colon, so an unqualified guard redacts the port and everything after it --
+   which also collapsed distinct findings, since the report dedupes on `id`.
+   `URL_PORT_TAIL` distinguishes them. And a tail slice such as ffuf's
+   `str(url)[-40:]` removes the OPENER, so such values are guarded before the
+   slice, not after.
+
+   Two more traps, both found only after the guard shipped. Orphan detection is
+   LOCAL to each opener: one value can carry several secrets, and a closer
+   belonging to a later opener must not vouch for an earlier one, so each
+   opener is judged on the region up to the next opener of its own kind and the
+   first orphan wins. And the bound reaches every nesting depth, so the guard
+   must too: `_bounded_for_redaction` guards at the point of the cut and
+   `_clip_finding` recurses into lists and dicts -- nuclei's `extracted-results`
+   is a list of strings lifted straight out of the scanned target's response
+   body, and it leaked a private key to the operator's text, the persisted
+   result and the report when only top-level fields were guarded.
+
+   The blank line above a stripped announcement is OPT-IN per tool
+   (`announce_blank`), not automatic: sslyze writes its blank as part of the
+   announcement, but dirb's `OUTPUT_FILE` line follows its banner's own
+   trailing blank, and collapsing unconditionally ate that legitimate line.
+
+   Field caps are named, not inline: `MAX_ID_CHARS` (512) must clear a full
+   253-char FQDN plus a prefix or distinct findings merge; `MAX_EVIDENCE_CHARS`
+   (8192) carries what the operator actually reads -- NSE script output and
+   testssl findings are routinely multi-KB and were unbounded before capture.
+3. **Capture-path stripping.** A tool may announce the structured file it was
+   told to write (dnsrecon logs `Saving records to JSON file: <path>` at INFO to
+   stderr and to `~/.config/dnsrecon/dnsrecon.log`; cli.py:1917-1918 registers
+   both sinks, and `run_command` merges stderr). That line exists only because
+   capture asked for it and it discloses a server-internal path, so `run_command`
+   takes a `strip_containing` argument and drops matching lines BEFORE applying
+   its 200-line bound -- doing it after would leave the
+   `(truncated N additional lines)` counter one higher than an unflagged run,
+   which is itself a byte difference. A tool may announce more than the path:
+   ffuf prints an "Output file" line AND a "File format" line whenever `-o` is
+   set, so `_run_with_capture` takes an `announces` tuple of additional markers
+   and `strip_containing` takes a tuple of markers. An announcement can also
+   carry its own blank line -- sslyze writes
+   `'\n       Wrote JSON output to "<path>".\n'` -- so a blank line immediately
+   above a dropped line is dropped with it. Upstream was checked at the pinned
+   version for EVERY capturing tool: only dirb and dnsrecon (one path-bearing
+   line), ffuf (two lines, the second without the path) and sslyze (blank plus
+   path line) emit anything extra; nmap, nikto, whatweb, wafw00f, testssl,
+   gobuster and subfinder emit nothing under their output flags.
+
+   nikto is a standing trap: it treats `-o` as a PREFIX and appends `".$fmt"`
+   unless the path already ends in it, so its capture suffix and its `-Format`
+   value are coupled. A test pins them together.
+
+Invariants (same as prior waves): arg-list command (no shell); server-generated
+out path; parsers never raise (incl. JSON depth bomb via _load_json); stdlib
+json only; findings redacted before persist; 200-line bound + opaque ids
+unchanged; the shared runner's leading-dash guard + size cap apply; 42 preserved
+tool signatures unchanged (NO fixture change).
+
+Test seams (extend tests/test_scanner_adapters.py): each parser maps a
+representative sample (dnsrecon JSON array; subfinder one host per line; amass
+`<type>:`-headed bare tokens) to the expected INFO findings; malformed/empty/
+hostile -> [] no raise; single-ID report accepts each new scanner. No real
+binaries.
+
+Mock at the RIGHT seam: a `run_command` mock cannot prove either text property,
+because the strip and the 200-line bound both live inside `run_command`. The
+byte-equality and truncation-counter tests mock `execute_command` and compare a
+captured run against an unflagged one. Nothing here proves the pinned binary's
+own stdout behaviour; that is established from upstream source at the pinned
+version and recorded per tool above.
+
+DEFERRED from this wave, with reasons (later increment):
+- dns_enum: runs three separate commands (nslookup/dig/host) concatenated — no
+  single structured output; needs a multi-source or text-parse approach.
+- fierce: text-only output; belongs to the Tier-2 raw-text tail.
+- theharvester_scan: `-f <name>` writes <name>.json/.xml (appends its own
+  extension), which breaks the shared runner's exact-out-path model; needs a
+  basename-then-read variant.
+
+Out of scope: the raw-text tail and the three deferred tools above.
