@@ -77,23 +77,43 @@ class LeadingDashGuardTests(unittest.TestCase):
                 self.assertEqual(1, len(spawned))
                 self.assertEqual(args[0], spawned[0][-1])
 
-    def test_metasploit_search_keeps_its_documented_dash_exemption(self):
-        # A leading dash is msfconsole search syntax, not a process option; wave
-        # 5 exempted it via guard_target=False. Centralizing the guard must not
-        # regress that.
+    def test_metasploit_search_stays_exempt_from_the_ARGV_dash_guard(self):
+        # metasploit_search is exempt from the process-argv dash guard
+        # (guard_target=False): its value is one -x token, so a leading dash is
+        # not a process option. Centralizing the argv guard must not regress
+        # that exemption.
+        #
+        # It is NOT exempt from the msfconsole-command-level guard added by #58,
+        # which rejects an option-shaped token because `search -o <path>` writes
+        # a file. The older comment here claimed a leading dash was merely
+        # "search syntax"; #58 disproved that, so this asserts the CURRENT rule:
+        # the rejection must come from the msfconsole guard, never from the argv
+        # dash guard, and legitimate queries must still reach the command.
         captured = {}
 
         def fake_run(cmd, timeout=None, **kwargs):
             captured["cmd"] = list(cmd)
             return "text"
 
-        with (
-            patch.object(self.server, "run_command", fake_run),
-            patch.object(self.server, "_capture_findings", lambda *a, **k: None),
-        ):
-            out = asyncio.run(self.server.metasploit_search("-x type:exploit"))
+        def call(query):
+            captured.clear()
+            with (
+                patch.object(self.server, "run_command", fake_run),
+                patch.object(self.server, "_capture_findings", lambda *a, **k: None),
+            ):
+                return asyncio.run(self.server.metasploit_search(query))
+
+        # The argv guard must not be what stops this one.
+        out = call("-x type:exploit")
         self.assertNotIn("must not begin with", out)
-        self.assertIn("-x type:exploit", " ".join(captured["cmd"]))
+        self.assertIn("option-like", out)
+        self.assertNotIn("cmd", captured)
+
+        # An internal dash is a real query, not an option, and still runs --
+        # this is what proves the msfconsole guard is not over-broad.
+        out = call("cve:2021-44228")
+        self.assertIn("cve:2021-44228", " ".join(captured["cmd"]))
+        self.assertNotIn("must not", out)
 
 
 class HydraServiceAllowlistTests(unittest.TestCase):
