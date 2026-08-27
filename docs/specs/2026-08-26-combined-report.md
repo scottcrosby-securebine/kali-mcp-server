@@ -488,3 +488,273 @@ DEFERRED from this wave, with reasons (later increment):
   basename-then-read variant.
 
 Out of scope: the raw-text tail and the three deferred tools above.
+
+## P2 wave 5 — raw-text tail (addendum, anchor for the wave)
+
+Scope: the LAST family and the last of the combined-report feature. Wire the
+tools that emit only unstructured human-readable text (no per-run structured
+output of any kind) to capture, per D1. Stacked on wave 4; reuse
+`_run_with_capture`'s `out_args=None` mode, `_safe_scanner_value`/`_clip`, and
+the never-raise discipline. Nothing new is invented.
+
+Tools wired (scanner label = tool's capture label):
+- whois_lookup (whois) — registration/ownership prose.
+- nbtscan_scan (nbtscan) — NetBIOS name table.
+- smb_enum (smbclient `-L`) — share listing.
+- metasploit_search (msfconsole `-x "search …"`) — module list.
+- metasploit_info (msfconsole `-x "info …"`) — module detail.
+- fierce_scan (fierce) — DNS recon prose (DEFERRED from wave 4 as "the Tier-2
+  raw-text tail"; this is that tail).
+
+Excluded, with reason:
+- responder_analyze — returns a STATIC help string and spawns NO subprocess.
+  There is no scan output to capture. Wiring it would fabricate a finding from a
+  constant. Left exactly as-is.
+
+Mechanism: one shared parser factory `_raw_text_parser(scanner, target)` returns
+a `parse_fn(text)` that emits AT MOST ONE INFO finding carrying the tool's own
+(redacted, bounded) text as `evidence`:
+  {id:"<scanner>-<target>", Severity:"INFO", Title:"<scanner> <target>",
+   evidence:<redacted+bounded raw text>}
+`evidence` is the tool's text INCLUDING `run_command`'s status banner, not the
+body alone: the banner is what the hard-failure and no-substance guards below
+read, and it carries the run's status into the report card.
+No per-record parsing: these tools have no record structure worth the
+fragility, and the operator value is the verbatim text captured into the
+report. Each wired tool routes through `_run_with_capture(cmd, "<label>",
+target, TIMEOUT_*, None, _raw_text_parser("<label>", target))`, keeping its
+validation, command construction and str return EXACTLY as-is. Add the six
+labels to the single-ID `generate_report` allowlist.
+
+Why `out_args=None` makes text byte-unchanged here: in that mode
+`_run_with_capture` calls `run_command(cmd, timeout=timeout)` with NO strip
+args — identical to the bare tool — and only adds a best-effort
+`_capture_findings` that swallows every exception. The returned text is
+byte-identical to a no-capture run by construction. The one behavioural change
+routing through the shared runner introduces is wave 4's leading-dash guard
+(`target` beginning with `-` is rejected as arg injection), and it is now
+OPT-OUT rather than unconditional. It is right for whois/nbtscan/smbclient/
+fierce, whose target reaches argv as its own positional token, and a legitimate
+domain or IP never begins with `-`. It is WRONG for the two metasploit tools:
+their query is interpolated inside a single `msfconsole -x "search …; exit"`
+token, so it never reaches argv as an option, and a leading dash there is
+msfconsole's OWN search syntax (`search -t exploit ms17_010`, `info -h`).
+Guarding it would delete working functionality to defend a boundary the query
+does not cross, so `_run_with_capture` takes `guard_target: bool = True` and
+those two callers pass False. A test pins both halves.
+
+The guard reaches two of the 42 preserved combined operations, since
+`quick_recon` calls `whois_lookup` and `network_sweep` calls `nbtscan_scan`.
+Their text is byte-identical for every real target and differs only for a
+leading-dash one, where the base built `nbtscan -x` and now returns the guard's
+error instead. That is the intended hardening, not a regression, but it is a
+byte change in a preserved tool and is recorded here rather than left implicit.
+
+Redaction/bounding: `evidence`, `id` and `Title` all pass
+`_safe_scanner_value` (bound-then-redact) then `_clip` — the wave-4 rule, so a
+credential in whois/msf output is redacted before it reaches the persisted
+result or the report, and a truncation cannot orphan a secret's trailing
+anchor. Caps: `id` MAX_ID_CHARS, `Title` MAX_TITLE_CHARS, `evidence`
+MAX_EVIDENCE_CHARS (8192) — the same fields and caps every other parser uses.
+The evidence cut is MARKED (`… [truncated]`) rather than silent, because for
+this family the text is the whole deliverable and a mid-line stop otherwise
+reads as the tool having ended there. Truncation is measured at BOTH points it
+can happen: `MAX_REDACT_CHARS` against the original text, and
+`MAX_EVIDENCE_CHARS` against the redacted body — redaction GROWS as well as
+shrinks (`token=x` -> `token=[REDACTED]`), so a body under the cap before
+redaction can exceed it after.
+
+This wave is the first to route WHOLE multi-line, attacker-controlled tool text
+through the wave-4 redaction helpers, and that input class exposed a cluster of
+PRE-EXISTING defects in them. Two helper fixes ship here; the rest were
+attempted, regressed three times, and were deliberately cut. See "Redaction
+hardening, deliberately NOT in this wave" below.
+
+Shipped, both verified with zero regressions across three adversarial rounds:
+1. **Case.** `PEM_OPENER`/`PEM_CLOSER` were case-sensitive while
+   `SECRET_VALUE_PATTERNS`' own private-key pattern carried `(?i)`, so a
+   lowercase `-----begin private key-----` with no END matched NEITHER and its
+   body leaked. Both anchors are now case-insensitive.
+2. **Order.** `SECRET_VALUE_PATTERNS` ran the keyword pattern before the
+   private-key one. The keyword value is `[^\r\n]*`, so
+   `password: -----BEGIN PRIVATE KEY-----KEY-----END PRIVATE KEY-----` was eaten
+   as a keyword value before the key pattern could match it. The private-key
+   pattern now runs FIRST.
+
+A differential over all twelve finding-producing parsers measures this pair at:
+**11 leaks closed, 0 opened**. The remaining leaks are pre-existing on main and
+unchanged by this wave (they are #27).
+
+Fix 1 has a COST, found by an independent reviewer whose corpus carried a shape
+mine did not, and an earlier draft of this paragraph wrongly claimed "0
+destroyed". A COMPLETE lowercase key pair followed by legitimate output now
+loses that output:
+
+    -----begin private key-----\nAAA\n-----end private key-----\nName Server: NS1
+
+`_redact_scanner_data` consumes the pair and leaves its opener behind as the
+`\1` of `\1[REDACTED]`; `PEM_OPENER`'s new `(?i)` then matches that surviving
+lowercase opener, finds no closer after it, and truncates to end-of-value.
+
+It is taken deliberately, for three reasons. The UPPERCASE twin of that input
+already truncates identically on main, so this extends an existing behaviour
+rather than inventing one, and RFC 7468 specifies uppercase, so the lowercase
+form is non-standard. The alternative is leaving a real credential leak open: a
+lowercase `-----begin private key-----` with no END is matched by NEITHER the
+guard's anchors nor the full pattern, and its body reaches the operator, the
+store and the report. Losing trailing text on a malformed key beats leaking a
+well-formed one. The underlying over-redaction (for both cases) is #27's to
+fix.
+
+Known NOT covered, and deliberately left:
+- The pattern set assumes a `key: value` or `key=value` shape, while `nbtscan`,
+  `smbclient -L` and `msfconsole info` emit whitespace-aligned COLUMNS
+  (`Password    hunter2`), which pass through untouched. Widening the keyword
+  pattern to accept column alignment changes redaction for all five waves and
+  risks eating legitimate table rows, so it is a decision to take deliberately,
+  not a fix to slip into this wave. RAISED to the user.
+- Everything under "Redaction hardening, deliberately NOT in this wave" below.
+- `_clip` can exceed its cap by the length of the redaction placeholder, because
+  `_redact_truncated_secret` appends `[REDACTED]` to an already-sliced string.
+  Worst observed is 8202 against a 8192 cap. `_clip` is byte-identical to main,
+  so this is pre-existing; recorded because this addendum claims the caps hold.
+  Filed with #27.
+- An orphan-guard redaction truncates to end-of-value BY DESIGN — once a
+  secret's closing anchor is gone there is no way to know where the secret
+  ends, so everything after the opener goes. It is marked with `[REDACTED]`,
+  not `… [truncated]`, because it is a redaction rather than a size cut. The
+  cases where that used to fire on well-formed content are fixed above; what
+  remains fires only on a genuine orphan.
+- The line-oriented parsers (`_parse_amass_text`, `_parse_subdomain_lines`)
+  turn each line of their input into a "host" finding, so a multi-line key body
+  pasted into subfinder/amass output is captured line by line as garbage
+  subdomains. That is those parsers working as designed on garbage rather than
+  a credential leak, it predates this wave, and guarding it would mean teaching
+  them what a key body looks like. Left alone; noted so a future sweep does not
+  re-file it as a leak.
+`target` is redacted before it is embedded in `id`/`Title`. It is in the `id`
+so the SINGLE-result renderer, which prints `id` as the article heading, names
+the scan the card belongs to. It is NOT needed for dedupe: `render_combined`
+already keys on `(scanner, target, id)`, matching D-level "same (tool, target,
+finding id) collapses to one", so a scanner-only id could not have merged two
+whois runs anyway. (An earlier draft of this addendum claimed it could; that
+was wrong and the code comment carried the same error.) Two collision cases, both checked end to end (an earlier draft of this
+paragraph named only the first and got its consequence wrong):
+- A query longer than 494 chars clips `id` to a shared value (`MAX_ID_CHARS` is
+  512, the longest prefix `metasploit_search-` is 18). This does NOT lose a
+  result: the combined key is `(scanner, target_ref, id)` and `target_ref` is
+  not clipped, so both still render. Every legitimate target clears the cap
+  anyway — a 253-char FQDN plus the longest prefix is 271.
+- Two targets that REDACT to the same string collapse `id` and `target_ref`
+  together, and one result is then dropped. Verified for `password=alpha` vs
+  `password=bravo`, `token: x` vs `token: y`, and `https://u:p1@h` vs
+  `https://u:p2@h`. Reaching it needs the operator to scan two targets that
+  differ only inside a credential, which is not a real workflow, and the fix
+  (keying on an unredacted target) would defeat the redaction. Accepted.
+- Related and accepted for the same reason: the raw `id` is derived from
+  `(scanner, target)` and NOT from the scan's content, unlike every other
+  parser, so re-running one tool against one target inside a single session
+  keeps only the first result. The "Scans" and "Total findings" tiles then
+  disagree, which is the only signal. A content digest in the `id` would fix it
+  at the cost of an unreadable article heading; deferred rather than taken.
+
+Hard-failure guard: the parser returns [] when the tool's text is empty, when
+it begins with a hard-failure status marker (`❌` command error, `⏱️` timeout),
+or when a `✅`/`⚠️` banner has NO body below it. `run_command` has FOUR
+no-substance returns, not two — it also emits `✅ Command completed
+successfully (no output)` and `⚠️ Command returned exit code N` — and each of
+those was persisting a card whose entire evidence was its own status line. A
+banner WITH a body is a real result and is captured, including a non-zero exit
+that still printed. This is a local guard for the raw parser only; the
+repo-wide "failed scans persist status:success" item is unchanged and out of
+scope.
+
+Rendering: NO `_render_report` change, and no Tier-2 raw-output card. A raw
+finding is a normal INFO finding; `render_findings`/`rows` already show its
+`evidence` in the per-scanner section as a fully escaped table cell. Two
+corrections to an earlier draft of this paragraph, both checked in source:
+`render_findings` calls `rows(finding, None, None)`, so the renderer does NOT
+truncate the value — the parser's own `MAX_EVIDENCE_CHARS` cap is the only
+bound, which is why that cut is now marked rather than silent. And `tbody td`
+carries `word-break:break-word` but no `white-space` rule, so HTML collapses
+the body's newlines: a whois record reads as one wrapped paragraph and an
+nbtscan or smbclient table loses its column structure.
+
+That is a readability limit, not a correctness or invariant one, and the fix is
+one `white-space:pre-wrap` declaration. It is DEFERRED rather than taken here
+because `_render_report`'s styling is governed by the external
+`securebine-design` source of record (tokens.css + STANDARD.md are law, per D5)
+which is not readable from this repo, and changing the design system on our own
+authority is exactly what D5 forbids. Raise it as a design change against that
+repo.
+
+Invariants (same as prior waves): arg-list command (no shell); parser never
+raises; findings redacted before persist; 200-line bound + opaque ids
+unchanged; leading-dash guard + size cap from the shared runner apply; 42
+preserved tool signatures and one-line docstrings unchanged (NO fixture
+change).
+
+Test seams (extend tests/test_scanner_adapters.py): `_raw_text_parser` maps a
+sample to one INFO finding with the text as evidence; empty/❌/⏱️ text -> [];
+non-string -> []; a credential in the text is redacted in evidence/id/Title; a
+>8192-char body is bounded and leaves no orphaned anchor; each wired tool
+returns its text byte-unchanged (mock `execute_command`, compare against a
+no-capture run) AND persists one finding; the single-ID report accepts each new
+scanner label; responder_analyze is NOT wired (still the static string, no
+capture). No real binaries.
+
+### Redaction hardening, deliberately NOT in this wave
+
+Three adversarial rounds found six more defects in the wave-4 redaction helpers.
+Every fix attempted for them introduced a fresh regression in the SHIPPED waves,
+so the work was cut out of wave 5 rather than shipped half-verified. It is
+tracked as issue #27, with its own gate. The record, so the next
+attempt starts from evidence rather than from scratch:
+
+Confirmed defects still present (all pre-existing on main, none introduced or
+worsened by this wave):
+- **H1** A later unrelated `@` vouches for an orphaned URL credential, because
+  the closer is searched for anywhere in the region while the full
+  `URL_CREDENTIAL` pattern cannot match across a newline. A whois record carries
+  an abuse-contact email in nearly every case, so this is reachable from
+  ordinary output: `https://svc:PW\nabuse@registrar.tld` keeps `PW`.
+- **H2** A keyword line eats a secret's OPENER (`[^\r\n]*` to end of line), so
+  an UNPAIRED key body — no `-----END-----`, which a hostile server simply omits
+  — leaks in full. Reordering the patterns does not fix it: the key pattern
+  needs an END to fire at all.
+- **H3** `URL_PORT_TAIL` accepts a port terminated only by `/ ? #` or
+  end-of-string, so a legitimate `https://host:8443` followed by `" ' , ; ) ]`,
+  whitespace, or a serialized `\n` is truncated along with the rest of the
+  value. Every IPv6 URL is truncated too.
+
+What was tried and why each attempt was reverted, so it is not retried blindly:
+- Anchoring the URL/JWT closers at the region start fixes H1, but turns H3 from
+  latent into constant, and needs the terminator set widened in the same change.
+- Running the orphan guard BEFORE `_redact_scanner_data` fixes H2, but then the
+  guard sees orphans that redaction was about to neutralize and amputates to
+  end-of-value: an ordinary 2-segment signed cookie
+  (`Set-Cookie: session=hdr.sig`) destroyed every header below it. That shape is
+  the commonest evidence form in the web family.
+- Treating a region that starts with the `[REDACTED]` placeholder as closed
+  fixes the second-pass over-redaction that anchoring causes, but is itself a
+  LEAK: tool output is attacker-controlled, so a hostile server prints the
+  literal placeholder and an unpaired key survives that base redacts.
+- Recording how far an accepted closer reaches (to stop a JWT's own payload
+  segment, which is itself a valid opener, reading as an orphan) skips an opener
+  that STARTS inside the accepted span but ends outside it, so a real orphan is
+  never judged.
+- Removing wave 4's per-opener locality bound survived a 200,000-case fuzz with
+  no counterexample, and it preserves legitimate text the bound destroys, but it
+  is only worth taking together with the rest.
+
+The lesson that matters most for the retry: a fully green suite hid all of the
+over-redaction regressions, because every redaction test asserted only that a
+secret was ABSENT and never that legitimate content SURVIVED. Any future attempt
+must carry a PAIRED table — this wave's `REDACTION_MUST_REMOVE` /
+`REDACTION_MUST_KEEP` in tests/test_scanner_adapters.py is the shape — and a
+base-versus-head differential over all twelve parsers measured in BOTH
+directions.
+
+This completes P2. After it lands the combined-report feature is feature-complete
+across all wired families; the deferred DNS tools (dns_enum, theharvester), the
+redaction hardening above, and PII decisions D1–D4 remain, tracked separately.
