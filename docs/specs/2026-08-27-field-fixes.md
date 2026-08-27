@@ -198,6 +198,16 @@ findings that share a scanner id.
 **Acceptance:** the 5-finding nikto case renders 5 articles; a genuine exact
 duplicate still collapses to 1.
 
+**Two carve-outs, both added during review.** `VOLATILE_FINDING_KEYS` excludes
+per-run keys from the identity (nuclei's `-jsonl` `timestamp`), and
+`RAW_TRANSCRIPT_SCANNERS` dedupes the six whole-transcript tools on identity
+alone, because their per-run noise lives INSIDE the evidence string where a
+key-level carve-out cannot reach it: whois stamps its database update time,
+`run_command`'s own truncation counter drifts with line count, and a failure
+banner carries the exit code. Without it six re-runs rendered six near-identical
+8KB cards. `amass` is deliberately excluded: its parser emits one
+content-derived finding per host.
+
 ### B2 — #38 trivy findings not normalized
 `render_findings` builds evidence from every key, so nested dicts render as
 Python reprs. **Confirmed by execution:** `CVSS` renders as
@@ -208,9 +218,39 @@ reads `Not reported` while `FixedVersion: 2.2.4` sits in the same table.
 reaches the remediation slot, `PrimaryURL`/`References` the reference slot,
 and no nested value is ever rendered as a Python repr.
 
-**Acceptance:** a rendered trivy finding contains no `{'` sequence; the
-remediation slot names the fixed version; report size for a realistic
-multi-CVE result drops materially.
+**What shipped is wider than "trivy", deliberately.** The repr defect lives in
+`rows()`, which fed EVERY key of EVERY finding to `str()`, so nuclei's `info`
+object and nmap's NSE tables hit it too. `flatten()` and `slots()` therefore run
+for every scanner's dict findings, not just trivy's. Operator-visible
+consequences the original issue did not ask for, recorded here rather than left
+to be discovered: `CVSS` collapses to a single V3-preferred score with its
+vector and source feed; `DataSource` is surfaced as `Advisory source`;
+`flatten` caps at 20 items per level and 4 levels deep; the references slot
+shows 25. Every cut is disclosed, but not identically: a WIDTH cut appends
+`(+N more)`, a DEPTH cut ends the branch with `…`, and a value over 4000
+characters ends with `… [truncated]`. A 5-deep reference therefore renders
+`a: b: c: d: …` and the innermost URL is not shown.
+
+**Acceptance:** a rendered trivy finding contains no `{'` sequence ANYWHERE,
+the references slot included; the remediation slot names the fixed version;
+report size for a realistic multi-CVE result drops — see the measurement below,
+which is -11.3% at 151 CVEs and roughly flat at 40, so "materially" holds only
+at the scale the issue was actually reported at.
+
+**Size, measured, and corrected once.** On a 151-CVE fixture carrying
+`Description`, 22 `References`, `CVSS`, `DataSource`, `Layer` and
+`PkgIdentifier`: 496,549 bytes before, 440,425 after, **-11.3%**. At 40 CVEs,
++0.7%. The saving comes from `Layer`/`PkgIdentifier`/`CVSS`/`DataSource` no
+longer repr-dumping.
+
+An earlier revision of this section claimed **-24.9%**. That figure was
+inflated by a ten-item cap on the references slot, which silently dropped 12 of
+every finding's 22 references. The cap is 25 now, so all real references render
+and the honest saving is roughly half what was first recorded. A thinner
+fixture omitting the nested keys shows a small INCREASE, because the references
+paragraph and the advisory-source line add back what promotion removed; the
+criterion is about realistic trivy output, which always carries those nested
+keys. Pinned by `tests/test_wave2_gate.py::ReportSizeTests`.
 
 ## Wave 3 — `run_command` status semantics (PR B)
 
@@ -222,6 +262,14 @@ scan that never ran is indistinguishable from a clean one.
 **Required:** a non-zero exit reports as a failure, and the normalized result
 `status` reflects it so `generate_report` does not count a failed scan as
 successful coverage.
+
+**Also changed, and required for C1 to be safe:** `_raw_text_parser`'s drop
+rule. It returned `[]` for any text starting with `❌` or `⏱️`. Once a non-zero
+exit arrives under `❌`, that rule would have silently stopped capturing every
+failed raw-text scan, so a failed whois or smbclient would reach the report with
+status `failed`, zero findings, and no explanation of why. The rule now tests
+SUBSTANCE: any status banner with nothing below it is dropped, any banner with a
+body is kept.
 
 **Authorized breakage (D1):** returned text changes for every failing tool.
 Three tests pin the old banner and must be updated:

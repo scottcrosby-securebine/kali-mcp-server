@@ -181,6 +181,12 @@ class ReportTests(unittest.TestCase):
             ("success", {name: f"✅ {name} ok" for name in stages}, True),
             ("partial", {**{name: f"✅ {name} ok" for name in stages}, "dns_enum": "❌ Error: dns failed"}, True),
             ("failed", {name: f"❌ Error: {name} failed" for name in stages}, False),
+            # Since #31 a non-zero exit reaches a stage as this banner, so this
+            # is the string a really-failed stage now carries.
+            ("failed", {name: "❌ Scan failed (exit code 2):\n\nconnection refused" for name in stages}, False),
+            # The ⚠️ row is KEPT, not rewritten: `_workflow_check` still maps a
+            # warning banner to a failed stage and nothing else covers that
+            # branch. run_command no longer produces it, other callers may.
             ("failed", {name: "⚠️ Scan completed with warnings (return code: 2)" for name in stages}, False),
         )
         for status, outputs, expects_report in cases:
