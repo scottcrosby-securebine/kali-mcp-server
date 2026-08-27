@@ -29,8 +29,12 @@ jobs:
       # working tree against a base revision.
       - name: Redaction differential gate
         run: |
-          git fetch --deepen=200 --quiet || true
-          python3 tests/redaction_differential.py
+          # Measure against what this change is actually built on. Pinning the
+          # script's default would compare against an ever-staler revision as
+          # main moves, which is the failure `--base` exists to prevent.
+          base="${{ github.event.pull_request.base.sha }}"
+          [ -n "$base" ] || base="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+          python3 tests/redaction_differential.py --base "$base"
 
   build-and-smoke:
     timeout-minutes: 60

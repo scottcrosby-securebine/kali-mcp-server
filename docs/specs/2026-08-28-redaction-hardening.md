@@ -116,6 +116,35 @@ Two consequences, both recorded rather than absorbed:
   stringifies a dict and two copies of one credential land in one value. The
   guard now redacts every orphan span rather than the earliest.
 
+## D3 — which URL standard the sanitiser assumes (user, 2026-08-28): "Assume WHATWG, close the leak"
+
+D2 was argued on the premise that a URL credential and a JWT "cannot contain
+whitespace by their own grammar". **That premise is wrong for URLs**, and the red
+team broke it. Two reviewers disagreed, each correct about a different standard:
+
+- RFC 3986 says userinfo cannot contain whitespace, which makes the bounded cut
+  sound. The Spec axis relied on this and passed D2.
+- The WHATWG URL Standard says a parser REMOVES tab, CR and LF from the input
+  before parsing. So `https://user:PASS\nWORD@host/x` is the single credential
+  `user:PASSWORD`, and bounding the cut at the newline left `WORD` in the report.
+
+The user ruled for WHATWG, so the sanitiser now assumes the more permissive
+parser. A URL orphan's run ends at a SPACE rather than at any whitespace, and
+only where no `@` is still reachable before that space; an `@` ahead of it means
+the credential may be continuing across a character the parser will strip. A JWT
+keeps the whitespace bound, its compact serialization admitting none.
+
+**This costs the benefit D2 was chosen for.** The whois abuse address on the line
+below an orphaned credential cannot survive, because under a WHATWG parser it may
+itself be part of that credential. Its keep expectation is removed from the paired
+table for the second time, and this is the reason. Both halves of the earlier
+claim — that the keep was satisfiable "honestly, because the cut is bounded" —
+were true under D2 and are not true under D3.
+
+D2's other benefit stands and is what the ruling preserved:
+`ws://gateway:live contact ops@example.com` keeps its tail, no `@` being
+reachable before the space.
+
 ## Confirmed list
 
 State values: inherited / confirmed / red-teamed / fixed / filed / declined.
@@ -133,7 +162,7 @@ not yet reproduced it from source. Nothing is fixed while still inherited.
 | X1 | `kali_pentest_server.py:545-557` (fixed opener-type order) | **leak** | The loop iterates opener types in the fixed order PEM, URL, JWT and returns on the first orphan of ANY type, so a later PEM orphan preempts an earlier JWT orphan and the JWT payload survives. `eyJhbGciOiJIUzI1NiJ9.LEAKEDPAYLOAD -----BEGIN PRIVATE KEY-----` → `eyJhbGciOiJIUzI1NiJ9.LEAKEDPAYLOAD [REDACTED]`; remove the trailing PEM and the payload is correctly redacted. A hostile server appends a bare `-----BEGIN PRIVATE KEY-----` to disarm the guard for everything before it. The comment at lines 542-544 says "the FIRST orphan wins", which holds within one opener type but not across types. Verified independently by the orchestrator. | fixed |
 | X2 | `kali_pentest_server.py:250` + `:553` | leak (low value) | `URL_PORT_TAIL` accepts an all-numeric password: `https://svc:98765` and `https://svc:12345/inbox` pass through unchanged. 98765 is not even a valid port (>65535), so a port-range check is a cheap discriminator. **Interacts with H3**: widening the terminator set makes X2 strictly worse, so the two must be fixed in one change. Verified independently by the orchestrator. | fixed |
 | X3 | `kali_pentest_server.py:619` + `:557` | over-redaction | H4's mechanism is not PEM-only. `\1[REDACTED]` preserves the opener for the complete URL-credential and complete-JWT patterns too, the guard rematches it, and line 557 truncates the rest of the field. `https://dbadmin:hunter2@db.internal/x` → `https://dbadmin:[REDACTED]`; a complete JWT followed by `Name Server: NS1` loses the name server. Same class as H4; folded into H4's fix, not a separate phase. | fixed |
-| X4a | `kali_pentest_server.py:600` + docstring at `:584-586` | latent | `_bounded_for_redaction` gates the orphan guard on `len(value) > MAX_REDACT_CHARS`, so for any string under 8192 chars `_safe_scanner_value` is `_redact_scanner_data` alone and applies NO guard — yet its docstring calls it "the one correct way to make scanner-controlled data safe to keep". Every current call site routes through `_clip`/`_clip_finding`, so there is no live leak. Any future caller trusting the docstring inherits H1's and H6's orphans directly. Verified independently by the orchestrator. | confirmed |
+| X4a | `kali_pentest_server.py:600` + docstring at `:584-586` | latent | **Same defect as the X4 row below; the two states disagreed and this is the stale one.** `_bounded_for_redaction` gates the orphan guard on `len(value) > MAX_REDACT_CHARS`, so for any string under 8192 chars `_safe_scanner_value` is `_redact_scanner_data` alone and applies NO guard — yet its docstring calls it "the one correct way to make scanner-controlled data safe to keep". Every current call site routes through `_clip`/`_clip_finding`, so there is no live leak. Any future caller trusting the docstring inherits H1's and H6's orphans directly. Verified independently by the orchestrator. | fixed |
 | X5 | `kali_pentest_server.py:561-572` + `:600` | leak | H1 propagating through the recursive path into a real nuclei field: `_clip_finding(_safe_scanner_value({"extracted-results": ["https://svc:PWLEAK\nabuse@registrar.tld", "ok"]}))` returns the credential intact. Same class as H1; folded into H1's fix. | fixed |
 
 | C1 | `kali_pentest_server.py` keyword pattern lookahead | **leak, introduced by the first attempt at this fix** | The H2 lookahead stopped the keyword value at ANY bare `scheme://`, not at a URL-CREDENTIAL opener, so a keyword whose value is an ordinary URL stopped being redacted at all. `password: http://svc.example/cb?k=SECRETVAL1` — base `password: [REDACTED]`, first-attempt head kept the whole URL. The guard cannot save it: there is no orphan opener to cut on. Found by the Spec review axis, not by the suite or the corpus. Fixed by stopping at `_URL_CREDENTIAL_OPENER_BODY`. | fixed |

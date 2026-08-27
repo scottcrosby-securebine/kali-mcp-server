@@ -165,9 +165,13 @@ CORPUS = [
      "PREFIXKEEP\nhttps://svc:LONGPWLEAK" + "P" * 9000 + "@host.example/x",
      ("LONGPWLEAK",), ("PREFIXKEEP",)),
 ]
-def _add_terminator_samples(server):
-    CORPUS.extend((f"ported-url-{label}", PORTED + tail, (), ("portsafe.example:8443",))
-                  for label, tail in _terminator_samples(server).items())
+def _corpus_for(server):
+    """The corpus plus the terminator samples this server's pattern implies.
+    Returned rather than appended to the module-level list: mutating that made
+    `run()` answer differently depending on whether `main()` had run first, and
+    made a second call duplicate every row."""
+    return CORPUS + [(f"ported-url-{label}", PORTED + tail, (), ("portsafe.example:8443",))
+                     for label, tail in _terminator_samples(server).items()]
 # The corpus reported zero regressions on a revision that leaked in 152 shapes,
 # because it carried no keyword-introduced URL and no bracketed userinfo. Both
 # are here now. A fixed corpus only ever measures what someone thought to write
@@ -225,12 +229,12 @@ def _parsers(module):
     return bound
 
 
-def run(base, head):
+def run(base, head, corpus):
     base_parsers, head_parsers = _parsers(base), _parsers(head)
     rows = {name: {"findings_base": 0, "findings_head": 0, **{bucket: [] for bucket in BUCKETS}}
             for name in EMBED}
     for name, row in rows.items():
-        for sample, payload, secrets, keeps in CORPUS:
+        for sample, payload, secrets, keeps in corpus:
             text = EMBED[name](payload)
             base_findings, head_findings = base_parsers[name](text), head_parsers[name](text)
             row["findings_base"] += len(base_findings)
@@ -255,7 +259,7 @@ def run(base, head):
     return rows
 
 
-def sweep(base, head):
+def sweep(base, head, server):
     """Every combination, not just the ones someone wrote down.
 
     The corpus above is a fixed list, so it can only catch a regression in a
@@ -277,12 +281,16 @@ def sweep(base, head):
         # The other direction. Sweeping leaks alone is exactly how an
         # over-redaction that cost a whole field per orphan reached review
         # with the gate reporting success.
-        # A key body is the ONE case with no whitespace bound -- it legitimately
-        # spans lines -- so end-of-value stays its cut and the tail after an
-        # unpaired key is lost by design (D2 keeps PEM as it was). Base only
-        # "kept" those tails by leaking the body above them. Every other body
-        # must preserve its tail.
-        if (SWEEP_KEEP in tail and "PRIVATE KEY" not in body
+        # An ORPHANED key is the one case with no whitespace bound -- its body
+        # legitimately spans lines and has no closing anchor -- so end-of-value
+        # stays its cut and the tail after it is lost by design (D2 keeps PEM as
+        # it was). Base only "kept" those tails by leaking the body above them.
+        # A COMPLETE pair is NOT exempt: it has an end anchor, so its tail must
+        # survive, and that is the H4/X3 class this change exists to fix. Decided
+        # with the production matchers rather than by looking for the words
+        # "PRIVATE KEY", so a spelling change cannot silently widen the exemption.
+        orphaned_key = server.PEM_OPENER.search(body) and not server.PEM_CLOSER.search(body)
+        if (SWEEP_KEEP in tail and not orphaned_key
                 and SWEEP_KEEP in base_out and SWEEP_KEEP not in head_out):
             destroyed.append((keyword, body, tail))
     total = len(SWEEP_KEYWORDS) * len(SWEEP_BODIES) * len(SWEEP_TAILS)
@@ -296,7 +304,7 @@ def sweep(base, head):
     return leaked + destroyed
 
 
-def report(rows):
+def report(rows, sample_count):
     width = max(len(name) for name in rows)
     header = f"{'parser'.ljust(width)}  base  head  " + "  ".join(
         label.rjust(6) for label in BUCKETS.values())
@@ -326,7 +334,7 @@ def report(rows):
     if empty:
         print(f"\nPARSERS THAT PRODUCED NOTHING (the corpus did not exercise them): {empty}")
     regressions = sum(len(row[bucket]) for row in rows.values() for bucket in REGRESSIONS)
-    print(f"\nsamples={len(CORPUS)} parsers={len(rows)} regressions={regressions} empty_parsers={len(empty)}")
+    print(f"\nsamples={sample_count} parsers={len(rows)} regressions={regressions} empty_parsers={len(empty)}")
     return 1 if regressions or empty else 0
 
 
@@ -347,10 +355,10 @@ def main():
     head = _load(REPO / "kali_pentest_server.py", "kali_pentest_server_head")
     print(f"base={args.base}  head={REPO / 'kali_pentest_server.py'}\n")
 
-    _add_terminator_samples(head)
-    rows = run(base, head)
-    status = report(rows)
-    leaked = sweep(base, head)
+    corpus = _corpus_for(head)
+    rows = run(base, head, corpus)
+    status = report(rows, len(corpus))
+    leaked = sweep(base, head, head)
     status = status or (1 if leaked else 0)
     if args.json:
         Path(args.json).write_text(json.dumps(

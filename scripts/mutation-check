@@ -22,17 +22,33 @@ git diff --quiet -- kali_pentest_server.py || {
 saved="$(mktemp)"; cp kali_pentest_server.py "$saved"
 clear_cache() { find . -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true; }
 restore() { cp "$saved" kali_pentest_server.py; rm -f "$saved"; clear_cache; }
-trap restore EXIT INT TERM
+# EXIT alone: with INT/TERM as well the handler runs twice, the second pass
+# copies a tempfile it already deleted, and a clean run reports failure.
+trap restore EXIT
 
 git show "$base:kali_pentest_server.py" > kali_pentest_server.py
 clear_cache
+out="$(mktemp)"
 set +e
-python3 -m unittest discover -s tests -p "$pattern"
-status=$?
+python3 -m unittest discover -s tests -p "$pattern" 2>&1 | tee "$out"
+status=${PIPESTATUS[0]}
 set -e
 
+# A non-zero exit is NOT proof. An import error, a missing dependency or a
+# runner that collected nothing all exit non-zero while asserting nothing, and
+# accepting them is the same mistake as reading the last output line instead of
+# the status. Require that tests RAN and that real assertions failed.
+ran="$(sed -n 's/^Ran \([0-9]\{1,\}\) test.*/\1/p' "$out" | tail -1)"
+verdict="$(grep -c '^FAILED (' "$out" || true)"
+rm -f "$out"
+
 if [ "$status" -eq 0 ]; then
-  echo "MUTATION CHECK FAILED: the suite PASSED against $base, so the new assertions pin nothing." >&2
+  echo "MUTATION CHECK FAILED: the suite PASSED against $base, so the assertions pin nothing." >&2
   exit 1
 fi
-echo "mutation check OK: suite exited $status against $base, as it must."
+if [ -z "$ran" ] || [ "$ran" -eq 0 ] || [ "$verdict" -eq 0 ]; then
+  echo "MUTATION CHECK INCONCLUSIVE: exited $status but collected ${ran:-0} tests with no FAILED" >&2
+  echo "verdict. That is an environment failure, not evidence the assertions pin anything." >&2
+  exit 2
+fi
+echo "mutation check OK: $ran tests ran against $base and the suite reported FAILED, as it must."

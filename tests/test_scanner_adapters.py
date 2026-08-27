@@ -1355,6 +1355,12 @@ class RawTextCaptureTests(unittest.TestCase):
         # already dropped the userinfo, so the username leaked out of one path.
         ("an orphaned credential does not disclose its username",
          "prefix https://dbadmin:hunter2", "dbadmin"),
+        # D3. A URL parser removes tab, CR and LF before parsing, so each of
+        # these is the single credential `user:PASSWORD` and stopping the cut at
+        # the whitespace left the tail of the password in the report.
+        ("a credential spanning a newline", "https://user:PASS\nWORDLEAKA@host/x", "WORDLEAKA"),
+        ("a credential spanning a tab", "https://user:PASS\tWORDLEAKB@host/x", "WORDLEAKB"),
+        ("a credential spanning a carriage return", "https://user:PASS\rWORDLEAKC@host/x", "WORDLEAKC"),
     )
     REDACTION_MUST_KEEP = (
         ("a plain whois record",
@@ -1406,14 +1412,13 @@ class RawTextCaptureTests(unittest.TestCase):
         # well-formed three-segment token was judged an orphan.
         ("content after a complete JWT",
          "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhIn0.SIGSIG Name Server: NS1", "NS1"),
-        # D2. A URL credential and a JWT cannot contain whitespace, so an orphan
-        # of either ENDS at the next whitespace and the rest of the field is
-        # ordinary text. Cutting to end-of-value regardless destroyed the line
-        # below every orphan -- including the abuse address in the whois record
-        # that made H1 reachable in the first place.
-        ("the line below an orphaned credential",
-         "https://svc:PWLEAK\nRegistrar Abuse Contact Email: abuse@registrar.tld",
-         "abuse@registrar.tld"),
+        # D2/D3. An orphan is cut only to the end of its own run, not to the end
+        # of the value. For a URL that run ends at a SPACE, not at any
+        # whitespace, and only where no `@` is still reachable: a URL parser
+        # strips tab, CR and LF before parsing, so a credential can span one.
+        # There is deliberately NO row here for an abuse address on the line
+        # BELOW an orphaned credential. It cannot survive, because under that
+        # parser it may itself be part of the credential.
         ("text after a credential-shaped phrase",
          "ws://gateway:live contact ops@example.com", "contact ops@example.com"),
         ("text after an orphaned JWT",
