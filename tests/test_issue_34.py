@@ -41,8 +41,9 @@ class NucleiZeroTemplateSelectionTests(unittest.TestCase):
                 result = asyncio.run(self.server.nuclei_scan("https://example.test", "", "info"))
 
         self.assertEqual(0, run.call_count)
-        self.assertIn("info", result)
-        self.assertIn("1", result)
+        # Pin the whole clause: assertIn("1", result) passed on ANY digit
+        # anywhere, so it stayed green with the count wrong.
+        self.assertIn("severity 'info' matches 0 of the 1 promoted template(s)", result)
         self.assertNotIn("FTL", result)
         for art in ("/_/", "__,_", "projectdiscovery.io"):
             self.assertNotIn(art, result)

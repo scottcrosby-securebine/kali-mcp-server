@@ -95,8 +95,16 @@ nuclei's full ASCII banner embedded.
 1. A selection yielding zero templates returns a clear, self-explanatory
    message naming the severity and the promoted-set size, not nuclei's FTL.
 2. nuclei's ASCII banner is stripped from error output.
-3. The nuclei config dir is pre-created so the
-   `Could not read nuclei-ignore file` error stops.
+3. The nuclei config dir is pre-created.
+
+**Claim downgraded after review.** The original wording said this "stops the
+`Could not read nuclei-ignore file` error". That is NOT verified and may be
+false: the mkdir creates the DIRECTORY, while the reported error names the
+`.nuclei-ignore` FILE, and `HOME=/tmp/scanner-home` is already writable tmpfs
+so nuclei could likely create the directory itself. No nuclei binary exists on
+the dev host, so this cannot be settled natively. What ships is the mkdir,
+which is harmless and best-effort. Whether the warning actually stops needs a
+container run and is tracked separately.
 
 Expanding the promoted template set is **out of scope** — that is #25.
 
