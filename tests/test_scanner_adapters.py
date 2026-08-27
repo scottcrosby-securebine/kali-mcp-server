@@ -1137,14 +1137,20 @@ class RawTextCaptureTests(unittest.TestCase):
         parse = self.server._raw_text_parser("whois", "x.com")
         # Nothing to capture: empty, whitespace, non-string, and the two hard
         # failure markers -- persisting an error string as an INFO finding would
-        # put a bogus card in the report.
+        # put a bogus card in the report. Both markers are one-liners with no
+        # body, which is what makes them nothing to capture (#31).
         for payload in ("", "   \n ", None, 42, [],
                         "❌ Error: Command not found. Tool may not be installed: whois",
                         "⏱️ Command timed out after 60 seconds. Try reducing scan scope."):
             with self.subTest(payload=repr(payload)[:24]):
                 self.assertEqual([], parse(payload))
-        # ⚠️ is a real run that exited non-zero WITH output: keep it.
-        self.assertEqual(1, len(parse("⚠️ Scan completed with warnings:\n\nNo match for domain")))
+        # A run that exited non-zero WITH output is a real result: keep it.
+        # Since #31 that arrives under ❌; the ⚠️ shape is kept alongside it
+        # because the parser must stay banner-agnostic about substance.
+        for payload in ("❌ Scan failed (exit code 1):\n\nNo match for domain",
+                        "⚠️ Scan completed with warnings:\n\nNo match for domain"):
+            with self.subTest(payload=payload[:24]):
+                self.assertEqual(1, len(parse(payload)))
 
     def test_parser_redacts_and_bounds(self):
         parse = self.server._raw_text_parser("whois", "x.com")
@@ -1236,13 +1242,20 @@ class RawTextCaptureTests(unittest.TestCase):
     def test_runs_with_nothing_to_show_are_not_findings(self):
         parse = self.server._raw_text_parser("nbtscan", "10.0.0.1")
         for text in ("✅ Command completed successfully (no output)",
+                     # #31 renamed the no-output non-zero line; the pre-#31
+                     # shape stays covered because the rule is about substance,
+                     # not about which banner run_command chose.
+                     "❌ Command failed with exit code 1",
                      "⚠️ Command returned exit code 1",
                      "❌ Error: Command not found. Tool may not be installed: nbtscan",
                      "⏱️ Command timed out after 60 seconds."):
             with self.subTest(text=text[:28]):
                 self.assertEqual([], parse(text))
-        # A banner WITH a body below it is a real result and is kept.
+        # A banner WITH a body below it is a real result and is kept -- ❌
+        # included, or a failed scan would reach the report with no evidence of
+        # WHY it found nothing.
         for text in ("✅ Scan completed successfully:\n\nDoing NBT name scan\n",
+                     "❌ Scan failed (exit code 1):\n\nNo reply from 10.0.0.1\n",
                      "⚠️ Scan completed with warnings:\n\nNo reply from 10.0.0.1\n"):
             with self.subTest(text=text[:28]):
                 self.assertEqual(1, len(parse(text)))
