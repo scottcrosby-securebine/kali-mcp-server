@@ -587,6 +587,86 @@ class WebCaptureTests(unittest.TestCase):
                     ):
                         response = asyncio.run(self.server.generate_report("A" * 32))
                     self.assertNotIn("Error", response)
+class DnsReconCaptureTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    def test_parsers_map_representative_samples(self):
+        s = self.server
+        dr = json.dumps([{"arguments": "-d x", "date": "now"},
+                         {"type": "A", "name": "x.com", "address": "1.2.3.4"},
+                         {"type": "MX", "name": "x.com", "exchange": "mail.x.com"}])
+        f = {x["id"]: x for x in s._parse_dnsrecon_json(dr)}
+        self.assertEqual(2, len(f))  # leading metadata record skipped
+        self.assertIn("dns-A-x.com", f)
+        self.assertEqual("INFO", f["dns-A-x.com"]["Severity"])
+        am = s._parse_amass_jsonl('{"name":"a.x.com","addresses":[{"ip":"1.1.1.1"}]}\n{"name":"b.x.com"}\nnot json\n')
+        self.assertEqual(["a.x.com", "b.x.com"], [x["Title"] for x in am])  # bad line skipped
+        sf = s._parse_subdomain_lines("a.x.com\nb.x.com\n\n")
+        self.assertEqual(["a.x.com", "b.x.com"], [x["Title"] for x in sf])
+
+    def test_parsers_never_raise(self):
+        s = self.server
+        # JSON parsers: bad input -> [].
+        for parser in (s._parse_dnsrecon_json, s._parse_amass_jsonl):
+            for payload in ("", "garbage", "{bad", None, 42, "[" * 40000 + "]" * 40000):
+                with self.subTest(parser=parser.__name__, payload=repr(payload)[:12]):
+                    self.assertEqual([], parser(payload))
+        # Plain-text parser: any non-empty line is a host, so it never raises and
+        # returns a list; empty/None -> [].
+        for payload in ("", None, 42):
+            self.assertEqual([], s._parse_subdomain_lines(payload))
+        self.assertIsInstance(s._parse_subdomain_lines("anything\ngoes"), list)
+
+    def test_tools_return_text_unchanged_and_capture(self):
+        cases = [
+            ("dns_recon", "dns_recon", "-j", json.dumps([{"type": "A", "name": "x.com", "address": "1.1.1.1"}]), ("x.com",)),
+            ("subfinder_scan", "subfinder", "-o", "a.x.com\nb.x.com", ("x.com",)),
+            ("amass_enum", "amass", "-json", '{"name":"a.x.com"}', ("x.com",)),
+        ]
+        for tool, scanner, flag, sample, args in cases:
+            with self.subTest(tool=tool):
+                captured = {}
+
+                def fake_run(cmd, timeout=None, _flag=flag, _sample=sample):
+                    self.assertNotIn("shell", cmd)
+                    path = cmd[cmd.index(_flag) + 1]
+                    Path(path).write_text(_sample, encoding="utf-8")
+                    return f"{scanner} TEXT"
+
+                def fake_write(document, _c=captured):
+                    _c["doc"] = document
+                    return "Z" * 32
+
+                with (
+                    patch.object(self.server, "run_command", fake_run),
+                    patch.object(self.server, "_write_scanner_result", fake_write),
+                ):
+                    out = asyncio.run(getattr(self.server, tool)(*args))
+                self.assertEqual(f"{scanner} TEXT", out)
+                self.assertEqual(scanner, captured["doc"]["scanner"])
+                self.assertTrue(captured["doc"]["findings"])
+
+    def test_single_id_report_accepts_dns_scanners(self):
+        for scanner in ("dns_recon", "subfinder", "amass"):
+            with self.subTest(scanner=scanner):
+                document = {"schema_version": 1, "scanner": scanner, "source_type": "host",
+                           "target_ref": "x.com", "status": "success",
+                           "findings": [{"id": "y", "Severity": "INFO", "Title": "y"}], "metadata": {}}
+                with tempfile.TemporaryDirectory() as root_text:
+                    root = Path(root_text)
+                    results = root / "results"
+                    reports = root / "reports"
+                    results.mkdir()
+                    (results / f"{'A' * 32}.json").write_text(json.dumps(document), encoding="utf-8")
+                    with (
+                        patch.object(self.server, "RESULTS_ROOT", results),
+                        patch.object(self.server, "REPORTS_ROOT", reports),
+                        patch.object(self.server.secrets, "token_urlsafe", return_value="R" * 32),
+                    ):
+                        response = asyncio.run(self.server.generate_report("A" * 32))
+                    self.assertNotIn("Error", response)
 
 
 if __name__ == "__main__":
