@@ -189,7 +189,10 @@ consequences the original issue did not ask for, recorded here rather than left
 to be discovered: `CVSS` collapses to a single V3-preferred score with its
 vector and source feed; `DataSource` is surfaced as `Advisory source`;
 `flatten` caps at 20 items per level and 4 levels deep; the references slot
-shows 25. Every cut is disclosed with `(+N more)`.
+shows 25. Every cut is disclosed, but not identically: a WIDTH cut appends
+`(+N more)`, a DEPTH cut ends the branch with `…`, and a value over 4000
+characters ends with `… [truncated]`. A 5-deep reference therefore renders
+`a: b: c: d: …` and the innermost URL is not shown.
 
 **Acceptance:** a rendered trivy finding contains no `{'` sequence ANYWHERE,
 the references slot included; the remediation slot names the fixed version;
