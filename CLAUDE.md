@@ -28,13 +28,9 @@ python3 -m unittest discover -s tests -v
 # redacted and HEAD does not. Pass --base after this branch merges.
 python3 tests/redaction_differential.py [--base <rev>] [--json out.json]
 
-# Mutation check for the redaction gate: the new assertions must FAIL against the
-# revision they were written for. Reads the runner's exit status for the same
-# reason as above.
-git show <base-rev>:kali_pentest_server.py > /tmp/base.py && cp kali_pentest_server.py /tmp/head.py \
-  && cp /tmp/base.py kali_pentest_server.py && find . -name __pycache__ -type d -exec rm -rf {} + \
-  && python3 -m unittest discover -s tests -p "test_scanner_adapters.py"; echo "want non-zero: $?" \
-  ; cp /tmp/head.py kali_pentest_server.py && find . -name __pycache__ -type d -exec rm -rf {} +
+# Mutation check: the redaction assertions must FAIL against the revision they
+# were written for, or they pin nothing. Restores the tree on any exit.
+scripts/mutation-check <base-rev>
 
 # Verify a built image under the required NNP boundary
 docker run --rm --security-opt=no-new-privileges \
@@ -50,7 +46,7 @@ scripts/update-nuclei-templates --source /path/to/upstream \
   http/cves/example.yaml
 ```
 
-Always clear `__pycache__` between the steps of a mutation check. A restore that rewrites the same byte count inside one second reproduces the source mtime, so Python runs the MUTATED bytecode while the source reads clean.
+`scripts/mutation-check` clears `__pycache__` around every swap, and anything else that swaps the source must too: a restore rewriting the same byte count inside one second reproduces the source mtime, so Python keeps running the MUTATED bytecode while the source reads clean.
 
 Container CI builds `linux/amd64` and `linux/arm64`, runs the image verifier, and exercises the hermetic MCP/container integration seam. QEMU arm64 CI is not physical Apple Silicon qualification; do not publish a claim that Docker Desktop qualification is complete until real Darwin/arm64 evidence exists. `python3 kali_pentest_server.py` on the host needs the Python dependencies plus the Kali binaries on `PATH`; the container is the reliable environment.
 

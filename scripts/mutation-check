@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Prove the redaction assertions actually catch what they claim: restore the
+# server from <base-rev>, run the suite against it, and require a FAILURE.
+#
+# Reads the runner's EXIT STATUS. Never `tail -1 | grep '^OK$'` here: a launcher
+# test prints a docker line after `OK`, which silently voids that check.
+#
+# Clears __pycache__ around every swap. A restore that rewrites the same byte
+# count inside one second reproduces the source mtime, so Python keeps running
+# the MUTATED bytecode while the source reads clean.
+set -euo pipefail
+
+base="${1:-}"
+[ -n "$base" ] || { echo "usage: scripts/mutation-check <base-rev> [test-pattern]" >&2; exit 2; }
+pattern="${2:-test_scanner_adapters.py}"
+repo="$(git rev-parse --show-toplevel)"
+cd "$repo"
+
+git diff --quiet -- kali_pentest_server.py || {
+  echo "refusing to run: kali_pentest_server.py has uncommitted changes" >&2; exit 2; }
+
+saved="$(mktemp)"; cp kali_pentest_server.py "$saved"
+clear_cache() { find . -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true; }
+restore() { cp "$saved" kali_pentest_server.py; rm -f "$saved"; clear_cache; }
+trap restore EXIT INT TERM
+
+git show "$base:kali_pentest_server.py" > kali_pentest_server.py
+clear_cache
+set +e
+python3 -m unittest discover -s tests -p "$pattern"
+status=$?
+set -e
+
+if [ "$status" -eq 0 ]; then
+  echo "MUTATION CHECK FAILED: the suite PASSED against $base, so the new assertions pin nothing." >&2
+  exit 1
+fi
+echo "mutation check OK: suite exited $status against $base, as it must."

@@ -1341,6 +1341,20 @@ class RawTextCaptureTests(unittest.TestCase):
          "https://us[er:PASSWORD1@host.example/x", "PASSWORD1"),
         ("a credential with a close bracket in the userinfo",
          "https://us]er:PASSWORD2@host.example/x", "PASSWORD2"),
+        # A keyword has ALREADY said the value is a secret, so a numeric value
+        # that merely looks like a port must not win over that.
+        ("a keyword whose value is a port-shaped credential",
+         "password: https://svc:12345", "12345"),
+        ("a keyword whose port-shaped credential has a path",
+         "token: https://svc:12345/path", "12345"),
+        # An empty username is a real credential shape and used to pass every
+        # matcher, because the userinfo was required to have a first character.
+        ("a credential with an empty username",
+         "prefix https://:PASSWORD1@db.internal/x suffix", "PASSWORD1"),
+        # The orphan branch kept `scheme://user:` while the complete branch
+        # already dropped the userinfo, so the username leaked out of one path.
+        ("an orphaned credential does not disclose its username",
+         "prefix https://dbadmin:hunter2", "dbadmin"),
     )
     REDACTION_MUST_KEEP = (
         ("a plain whois record",
@@ -1392,19 +1406,51 @@ class RawTextCaptureTests(unittest.TestCase):
         # well-formed three-segment token was judged an orphan.
         ("content after a complete JWT",
          "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhIn0.SIGSIG Name Server: NS1", "NS1"),
+        # D2. A URL credential and a JWT cannot contain whitespace, so an orphan
+        # of either ENDS at the next whitespace and the rest of the field is
+        # ordinary text. Cutting to end-of-value regardless destroyed the line
+        # below every orphan -- including the abuse address in the whois record
+        # that made H1 reachable in the first place.
+        ("the line below an orphaned credential",
+         "https://svc:PWLEAK\nRegistrar Abuse Contact Email: abuse@registrar.tld",
+         "abuse@registrar.tld"),
+        ("text after a credential-shaped phrase",
+         "ws://gateway:live contact ops@example.com", "contact ops@example.com"),
+        ("text after an orphaned JWT",
+         "eyJhbGciOiJIUzI1NiJ9.PAYLOADLEAK Name Server: NS1", "NS1"),
+        ("text after a credential with an empty username",
+         "prefix https://:PASSWORD1@db.internal/x suffix", "suffix"),
     )
 
     def test_clip_never_exceeds_its_cap(self):
-        """#27 H5. The guard APPENDS its placeholder to an already-sliced
-        string, so a kept opener ending exactly at the boundary returned
-        `limit + 10` and broke a cap the docs call hard. Only the JWT opener
-        can overshoot: the key opener is cut away rather than kept, and a URL
-        cut at its colon takes the port branch."""
+        """#27 H5. The guard APPENDS its placeholder to what it kept, so an
+        opener landing near the boundary returned more than `limit`. BOTH kept
+        openers do it -- an earlier version of this test said only the JWT one
+        could, and exercised only JWT pads, so the URL case sat unpinned while
+        the claim read as verified. A limit shorter than the placeholder is
+        covered too: it used to make the slice negative and GROW the result."""
         cap = self.server.MAX_EVIDENCE_CHARS
-        for pad in (cap - 12, cap - 25, cap - 13, cap - 11):
-            with self.subTest(pad=pad):
-                value = "A" * pad + "eyJabcdefgh." + "B" * 500
-                self.assertLessEqual(len(self.server._clip(value, cap)), cap)
+        for opener in ("eyJabcdefgh.", "https://svc:"):
+            for offset in range(8, 30):
+                with self.subTest(opener=opener, offset=offset):
+                    value = "A" * (cap - offset) + opener + "B" * 500
+                    self.assertLessEqual(len(self.server._clip(value, cap)), cap)
+        for limit in range(0, 15):
+            with self.subTest(short_limit=limit):
+                self.assertLessEqual(len(self.server._clip("eyJabcde.", limit)), limit)
+
+    def test_paired_table_covers_every_terminator_the_pattern_accepts(self):
+        """The terminator set was spelled three times and drifted three times:
+        `}` and the tab ended up accepted by `URL_PORT_TAIL` and pinned by
+        nothing. Hand-syncing copies is what failed, so this asserts the
+        coverage instead -- add a terminator to the pattern and this fails until
+        a row pins it."""
+        pinned = "".join(text[len("see https://host:8443")] for _, text, _ in self.REDACTION_MUST_KEEP
+                         if text.startswith("see https://host:8443"))
+        for terminator in self.server.PORT_TERMINATORS:
+            with self.subTest(terminator=terminator):
+                self.assertIn(terminator, pinned)
+        self.assertTrue({" ", "\t"} <= set(pinned), "whitespace terminators must be pinned too")
 
     def test_redaction_removes_secrets_and_keeps_everything_else(self):
         parse = self.server._raw_text_parser("whois", "example.com")

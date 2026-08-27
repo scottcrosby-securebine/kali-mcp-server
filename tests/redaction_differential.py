@@ -86,12 +86,19 @@ KEEP_HEADERS = ("Server: nginx/1.18.0", "Content-Type: text/html",
                 "X-Frame-Options: DENY", "Location: /login")
 HEADER_KEEPS = ("nginx/1.18.0", "text/html", "DENY", "/login")
 PORTED = "https://portsafe.example:8443"
-# Each terminator gets its own sample so the table names the one that broke.
-TERMINATORS = {
-    "slash": "/status", "query": "?a=1", "fragment": "#top", "doublequote": '"',
-    "singlequote": "'", "comma": ",", "semicolon": ";", "paren": ")", "bracket": "]",
-    "space": " next", "tab": "\tnext", "end-of-string": "", "backslash-n": "\\n",
-}
+# Derived from the pattern's own spelling, not hand-kept beside it: this table
+# was the third copy of the terminator set and had already lost `}` and the real
+# newline, so the differential passed while two accepted terminators went
+# unexercised. Adding one to PORT_TERMINATORS now adds a sample here.
+def _terminator_samples(server):
+    named = {"/": "slash", "?": "query", "#": "fragment", '"': "doublequote",
+             "'": "singlequote", ",": "comma", ";": "semicolon", ")": "paren",
+             "]": "bracket", "}": "brace"}
+    tails = {named.get(char, f"char-{ord(char)}"): char + "next"
+             for char in server.PORT_TERMINATORS}
+    tails.update({"space": " next", "tab": "\tnext", "newline": "\nnext",
+                  "end-of-string": "", "backslash-n": "\\n"})
+    return tails
 
 # (name, payload, secrets that must NOT survive, legitimate values that MUST)
 CORPUS = [
@@ -158,8 +165,9 @@ CORPUS = [
      "PREFIXKEEP\nhttps://svc:LONGPWLEAK" + "P" * 9000 + "@host.example/x",
      ("LONGPWLEAK",), ("PREFIXKEEP",)),
 ]
-CORPUS += [(f"ported-url-{label}", PORTED + tail, (), ("portsafe.example:8443",))
-           for label, tail in TERMINATORS.items()]
+def _add_terminator_samples(server):
+    CORPUS.extend((f"ported-url-{label}", PORTED + tail, (), ("portsafe.example:8443",))
+                  for label, tail in _terminator_samples(server).items())
 # The corpus reported zero regressions on a revision that leaked in 152 shapes,
 # because it carried no keyword-introduced URL and no bracketed userinfo. Both
 # are here now. A fixed corpus only ever measures what someone thought to write
@@ -188,8 +196,15 @@ SWEEP_BODIES = (
     f"-----BEGIN PRIVATE KEY-----\n{SWEEP_TOKEN}\n-----END PRIVATE KEY-----",
     f"Bearer {SWEEP_TOKEN}", f"Basic {SWEEP_TOKEN}", f"ghp_{SWEEP_TOKEN}AAAAAAAAAAAAAAAAAAAA",
     f"?access_token={SWEEP_TOKEN}", SWEEP_TOKEN,
+    # Port-shaped and empty-username credentials. Neither was in the alphabet,
+    # and both turned out to be live leaks.
+    "https://svc:12345", "https://svc:00001", f"https://:{SWEEP_TOKEN}@db.internal/x",
+    f"https://us[er:{SWEEP_TOKEN}@h/x", f"ws://gateway:{SWEEP_TOKEN}",
 )
-SWEEP_TAILS = ("", "\nName Server: NS1", " trailing text", "\n")
+# Each non-empty tail carries SWEEP_KEEP so the destroyed direction has
+# something to measure: it is ordinary text sitting after the secret.
+SWEEP_KEEP = "ZQKEEPZQ"
+SWEEP_TAILS = ("", f"\nName Server: {SWEEP_KEEP}", f" trailing {SWEEP_KEEP}", "\n")
 
 BUCKETS = {
     "LEAK CLOSED": "closed", "LEAK OPENED": "opened",
@@ -253,18 +268,32 @@ def sweep(base, head):
     def path(module, text):
         return module._clip(module._safe_scanner_value(text), module.MAX_EVIDENCE_CHARS)
 
-    leaked = []
+    leaked, destroyed = [], []
     for keyword, body, tail in itertools.product(SWEEP_KEYWORDS, SWEEP_BODIES, SWEEP_TAILS):
         text = keyword + body + tail
-        if SWEEP_TOKEN not in path(base, text) and SWEEP_TOKEN in path(head, text):
+        base_out, head_out = path(base, text), path(head, text)
+        if SWEEP_TOKEN not in base_out and SWEEP_TOKEN in head_out:
             leaked.append((keyword, body, tail))
+        # The other direction. Sweeping leaks alone is exactly how an
+        # over-redaction that cost a whole field per orphan reached review
+        # with the gate reporting success.
+        # A key body is the ONE case with no whitespace bound -- it legitimately
+        # spans lines -- so end-of-value stays its cut and the tail after an
+        # unpaired key is lost by design (D2 keeps PEM as it was). Base only
+        # "kept" those tails by leaking the body above them. Every other body
+        # must preserve its tail.
+        if (SWEEP_KEEP in tail and "PRIVATE KEY" not in body
+                and SWEEP_KEEP in base_out and SWEEP_KEEP not in head_out):
+            destroyed.append((keyword, body, tail))
     total = len(SWEEP_KEYWORDS) * len(SWEEP_BODIES) * len(SWEEP_TAILS)
-    print(f"\nSWEEP: {total} combinations, {len(leaked)} leak on head that base redacted")
-    for keyword, body, tail in leaked[:20]:
-        print(f"  {keyword!r} + {body!r} + {tail!r}")
-    if len(leaked) > 20:
-        print(f"  ... and {len(leaked) - 20} more")
-    return leaked
+    print(f"\nSWEEP: {total} combinations, {len(leaked)} leak on head that base redacted, "
+          f"{len(destroyed)} destroy content base kept")
+    for label, hits in (("LEAK", leaked), ("DESTROYED", destroyed)):
+        for keyword, body, tail in hits[:10]:
+            print(f"  {label}  {keyword!r} + {body!r} + {tail!r}")
+        if len(hits) > 10:
+            print(f"  ... and {len(hits) - 10} more {label}")
+    return leaked + destroyed
 
 
 def report(rows):
@@ -318,6 +347,7 @@ def main():
     head = _load(REPO / "kali_pentest_server.py", "kali_pentest_server_head")
     print(f"base={args.base}  head={REPO / 'kali_pentest_server.py'}\n")
 
+    _add_terminator_samples(head)
     rows = run(base, head)
     status = report(rows)
     leaked = sweep(base, head)
@@ -325,7 +355,7 @@ def main():
     if args.json:
         Path(args.json).write_text(json.dumps(
             {"base_commit": args.base, "exit_status": status,
-             "sweep_leaks": leaked, "parsers": rows},
+             "sweep_findings": leaked, "parsers": rows},
             indent=2, sort_keys=True), encoding="utf-8")
     return status
 

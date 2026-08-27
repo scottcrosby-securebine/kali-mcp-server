@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -21,6 +23,14 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - name: Run report and browser acceptance tests
         run: python -m unittest discover -s tests -v
+
+      # Not collected by `unittest discover`, so it needs its own step or it
+      # only ever runs when someone remembers. Needs full history: it diffs the
+      # working tree against a base revision.
+      - name: Redaction differential gate
+        run: |
+          git fetch --deepen=200 --quiet || true
+          python3 tests/redaction_differential.py
 
   build-and-smoke:
     timeout-minutes: 60

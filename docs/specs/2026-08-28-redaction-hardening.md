@@ -83,6 +83,39 @@ answered does not arise. The Spec review axis independently checked this against
 the code and found no path where the guard can be fooled by attacker-supplied
 `[REDACTED]`. The D1 section above is left exactly as written; this supersedes it.
 
+## D2 — how far an orphan cut reaches (user, 2026-08-28): "Bound the cut at whitespace"
+
+This SUPERSEDES a decision recorded in `docs/specs/2026-08-26-combined-report.md`:
+
+> An orphan-guard redaction truncates to end-of-value BY DESIGN -- once a
+> secret's closing anchor is gone there is no way to know where the secret
+> ends, so everything after the opener goes.
+
+That premise holds for a private key, whose body legitimately spans lines. It is
+false for a URL credential and a JWT: neither can contain whitespace by its own
+grammar, so an orphan of either provably ends at the next whitespace. Holding to
+the old rule destroyed the rest of the field for any text merely shaped like
+`scheme://word:word` — `ws://gateway:live contact ops@example.com` lost the
+whole line, and so did the abuse address below the very whois orphan that made
+H1 reachable.
+
+The ruling: an anchored (URL or JWT) orphan is redacted only to the end of the
+non-whitespace run that follows it. PEM keeps end-of-value. An EMPTY run means
+the truncation landed on the opener itself, so the extent is unknown again and
+end-of-value still applies there.
+
+Two consequences, both recorded rather than absorbed:
+
+- The corpus keep expectation removed under the earlier ruling is RESTORED. It
+  is satisfiable now, and honestly: the email below an orphan survives because
+  the cut is bounded, not because the password leaked.
+- "The first orphan wins" stopped being true. It was only ever true because
+  nothing after an unbounded cut survived. Bounding the cut left a SECOND orphan
+  further along in the clear — caught by the differential's own sweep once it was
+  taught to measure both directions, in `_parse_whatweb_json`, where the parser
+  stringifies a dict and two copies of one credential land in one value. The
+  guard now redacts every orphan span rather than the earliest.
+
 ## Confirmed list
 
 State values: inherited / confirmed / red-teamed / fixed / filed / declined.
@@ -130,3 +163,21 @@ every test must exercise the COMPOSED path — `_clip(_safe_scanner_value(x), ca
 A fully green 157-test suite hid every over-redaction regression, because every
 redaction test asserted only that a secret was ABSENT, never that legitimate
 content SURVIVED. Both halves are asserted from now on.
+
+
+## Round 5 review findings, all fixed
+
+| id | source | severity | what | state |
+|---|---|---|---|---|
+| F1 | Spec axis | over-redaction | H6(a) was marked fixed but had regressed into over-redacting BOTH sides: `ws://gateway:live contact ops@example.com` lost everything from the URL on, where base kept it. Fixed by D2. | fixed |
+| F2 | Spec axis | wrong claim | The H5 correction was itself wrong. Measured on base AND head, the URL opener overshoots too (`"A"*8171 + "https://svc:BBBB"` → 8193 against an 8192 cap). The claim survived in the `_clip` comment, the spec row and the test docstring, and the test exercised only JWT pads, so the URL case sat unpinned while reading as verified. Both openers are now covered, across a 22-offset range. | fixed |
+| F3 | Spec axis | gate gap | The sweep measured leaks only, so the one class that regressed — destruction — was invisible to it. It now measures both directions. | fixed |
+| R1 | red team | **leak** | `password: https://svc:12345` survived in full: the keyword lookahead stopped at the opener, then the port branch accepted the numeric value as a port, though the keyword had already said it was a password. The value now stops at an opener ONLY where that opener ends the line, which is the one case whose body outlives the value. | fixed |
+| R2 | red team | **leak** | `https://:PASSWORD1@db.internal/x` bypassed every matcher, because the userinfo was required to have a first character. An empty username is a real credential shape. Pre-existing on base as well as head. | fixed |
+| R3 | red team | cap violation | `_clip` with a limit shorter than the placeholder made the slice negative and GREW the result: `_clip("eyJabcde.", 9)` returned 28 characters. Latent under shipped caps, but the invariant is that it never exceeds its limit. | fixed |
+| R4 | red team | disclosure | The orphan branch kept `scheme://user:` while the complete-pattern branch already dropped the userinfo, so the username leaked out of one path and not the other. The orphan branch now keeps the scheme alone. | fixed |
+| S1r | Standards | gate gap | The gate ran only when a human remembered; CI ran `unittest discover` alone. It now has its own workflow step, with full history, since it diffs against a base revision. | fixed |
+| S2r | Standards | drift risk | Two spellings still duplicated: the userinfo tail and the PEM END. Both are single constants now. | fixed |
+| S5r | Standards | gate gap | The terminator set had drifted a THIRD time — the differential's table held 13 of the 15 the pattern accepts, missing `}` and the real newline. Hand-syncing three copies is what kept failing, so the pattern is now the one spelling, the differential derives its samples from it, and a test asserts the paired table covers every terminator the pattern accepts. Add one to the pattern and the suite fails until a row pins it. | fixed |
+| S1m | Standards | hazard | The `CLAUDE.md` mutation recipe was a five-line chain that overwrote TRACKED source and left the tree dirty if interrupted. It is `scripts/mutation-check <rev>` now, which refuses to start on a dirty tree and restores on any exit. | fixed |
+| S4 | Standards | style | Comment density. The blocks narrating what was tried are trimmed to what the code does; the history lives here and in the commit messages. | fixed |
