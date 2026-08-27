@@ -123,6 +123,14 @@ to HTTPS rather than HTTP; `host:443` is treated as HTTPS; an explicit
 **Acceptance:** a table test covers bare host, `http://`, `https://`, IP,
 `host:443`, and `host:8080`, asserting the URL curl receives for each.
 
+**Added during review, not in the original issue.** The scheme gate governs
+only curl's FIRST request, so `--proto =http,https --proto-redir =http,https`
+pins both the initial and the redirect protocol sets: an `ftp://` redirect from
+an attacker-controlled server was observed attempting the connect under
+`--network=host`. `-g` disables URL globbing, without which
+`127.0.0.1:[1-65535]` is a range and one audit fans out into a port sweep
+(verified: three connects from one call).
+
 ### A5 — #35 trivy/syft `source_type` discoverability
 `kali_pentest_server.py:190-191, 2514, 2539`. `source_type="image"` is
 rejected and neither the docstring nor the error names the valid set.

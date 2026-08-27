@@ -100,6 +100,14 @@ class FuzzTargetRobustnessTests(unittest.TestCase):
             with self.subTest(target=target):
                 self.assertIsInstance(self.server._fuzz_target(target), str)
 
+    def test_a_malformed_target_is_handed_over_unchanged_not_rebuilt(self):
+        # The fallback must NOT append /FUZZ: that was the pre-F1 shape and put
+        # the placeholder after any query. ffuf's Go parser accepts a bracketed
+        # host, so it would run and fuzz the query value.
+        for target in ("http://[127.0.0.1]/app?q=1", "http://x[y]z.com/app?q=1"):
+            with self.subTest(target=target):
+                self.assertEqual(target, self.server._fuzz_target(target))
+
     def test_both_fuzzers_survive_a_malformed_target(self):
         import asyncio
         for tool in ("ffuf_scan", "wfuzz_scan"):
@@ -136,6 +144,12 @@ class CurlProtocolPinningTests(unittest.TestCase):
         self.assertIn("--proto-redir", argv)
         self.assertEqual("=http,https", argv[argv.index("--proto") + 1])
         self.assertEqual("=http,https", argv[argv.index("--proto-redir") + 1])
+
+    def test_url_globbing_cannot_turn_one_audit_into_a_port_sweep(self):
+        # "127.0.0.1:[1-65535]" is a curl RANGE without -g; one call fanned out
+        # into separate connects, bounded only by TIMEOUT_SHORT, under
+        # --network=host.
+        self.assertIn("-g", self.argv_for("127.0.0.1:[18098-18100]"))
 
     def test_a_legal_uppercase_scheme_is_honoured_not_mangled(self):
         # RFC 3986 schemes are case-insensitive; HTTP://example.com is a legal
