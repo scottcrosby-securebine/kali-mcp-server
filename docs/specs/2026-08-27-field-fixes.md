@@ -51,6 +51,9 @@ The repo's existing convention, unchanged:
 - **Each wave agent writes its tests to its own new file,
   `tests/test_issue_<N>.py`.** No agent appends to an existing test file.
   This keeps the test-side merge surface at zero.
+- Regressions found by a REVIEW rather than by an issue go in
+  `tests/test_wave<N>_gate.py`, since they span several issues and belong to
+  no single one.
 - `tests/fixtures/legacy_tool_contract.json` MUST NOT change in wave 1 or
   wave 2. Wave 3 (#31) may change only what D1 authorizes.
 
@@ -171,6 +174,16 @@ and no nested value is ever rendered as a Python repr.
 **Acceptance:** a rendered trivy finding contains no `{'` sequence; the
 remediation slot names the fixed version; report size for a realistic
 multi-CVE result drops materially.
+
+**Size, measured.** On a 151-CVE fixture carrying `Description`, 22
+`References`, `CVSS`, `DataSource`, `Layer` and `PkgIdentifier`:
+520,715 bytes before, 390,823 after, **-24.9%**. At 40 CVEs, -12.6%. The drop
+comes from `Layer`/`PkgIdentifier`/`CVSS`/`DataSource` no longer repr-dumping.
+A thinner fixture omitting the nested keys shows a small INCREASE instead,
+because the references paragraph and the advisory-source line add back what
+promotion removed; the criterion is about realistic trivy output, which always
+carries those nested keys. Pinned by
+`tests/test_wave2_gate.py::ReportSizeTests`.
 
 ## Wave 3 — `run_command` status semantics (PR B)
 

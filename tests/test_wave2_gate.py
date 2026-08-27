@@ -81,6 +81,57 @@ class DedupeVolatileKeyTests(unittest.TestCase):
         self.assertEqual(3, combined(self.server, [result(self.server, findings, "nikto")]).count("<article>"))
 
 
+class NucleiMatchedAtTests(unittest.TestCase):
+    """The volatile-key carve-out must not swallow a DISTINGUISHING field."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    def test_hits_of_one_template_at_different_urls_are_all_kept(self):
+        # `matched-at` is nuclei's matched URL and is often the only thing
+        # separating two hits of one template. It was briefly in
+        # VOLATILE_FINDING_KEYS, which collapsed these three to one and
+        # reintroduced #37 for nuclei.
+        findings = [{"template-id": "tech-detect", "id": "tech-detect", "Severity": "INFO",
+                     "Title": "hit", "matched-at": url}
+                    for url in ("http://h/a?q=1", "http://h/b?q=1", "http://h/c?q=1")]
+        self.assertEqual(3, combined(self.server, [result(self.server, findings)]).count("<article>"))
+
+    def test_only_keys_with_a_real_producer_are_treated_as_volatile(self):
+        # A speculative denylist entry is how the bug above happened.
+        self.assertEqual({"timestamp"}, set(self.server.VOLATILE_FINDING_KEYS))
+
+
+class ReportSizeTests(unittest.TestCase):
+    """B2 acceptance: report size for a realistic multi-CVE result drops."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    def test_a_realistic_multi_cve_report_stays_under_its_measured_ceiling(self):
+        # Measured against the pre-fix renderer on this exact fixture:
+        # 151 CVEs rendered 520,715 bytes before and 390,823 after (-24.9%),
+        # because Layer/PkgIdentifier/CVSS/DataSource no longer repr-dump.
+        # The ceiling is the measured figure plus headroom, so this catches a
+        # regression back toward repr-dumping without pinning exact bytes.
+        findings = [{
+            "VulnerabilityID": f"CVE-2024-{1000 + i}", "Title": f"Vulnerability {i}",
+            "Severity": "HIGH", "PkgName": f"pkg{i}", "InstalledVersion": "1.0.0",
+            "FixedVersion": "1.0.1", "Description": "D" * 1100,
+            "PrimaryURL": f"https://avd.aquasec.com/nvd/cve-2024-{1000 + i}",
+            "References": [f"https://ref{j}.example/{i}" for j in range(22)],
+            "CVSS": {"nvd": {"V3Score": 7.5, "V3Vector": "CVSS:3.1/AV:N/AC:L"}},
+            "DataSource": {"ID": "ghsa", "Name": "GitHub Security Advisory pip"},
+            "Layer": {"DiffID": "sha256:" + "a" * 64},
+            "PkgIdentifier": {"PURL": f"pkg:pypi/pkg{i}@1.0.0"},
+        } for i in range(151)]
+        rendered = render(self.server, findings, scanner="trivy")
+        self.assertEqual(151, rendered.count("<article>"))
+        self.assertLess(len(rendered), 430_000)
+
+
 class CvssSelectionTests(unittest.TestCase):
     """N-1, N-2, N-3."""
 
