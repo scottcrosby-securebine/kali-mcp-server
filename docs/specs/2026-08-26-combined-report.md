@@ -251,3 +251,62 @@ single-ID report accepts each new scanner.
 
 Out of scope: other tool families (later waves); deep protocol/cert analysis
 beyond the weak-protocol/weak-cipher/testssl-severity rules above.
+
+---
+
+## P2 wave 3 — web family (addendum, anchor for the wave)
+
+Scope: wire the seven web tools to capture, per D1 (preserve text, side-channel
+structured). NO change to any tool's human-readable str return. Stacked on wave
+2; reuse `_run_with_capture`, `_safe_xml_root`, the severity helpers, and the
+best-effort/never-raise discipline.
+
+Tools + structured flag + parser mapping (each parser returns [] on bad input,
+never raises; findings redacted; normalize to id/Title/Severity/evidence):
+- whatweb_scan: `--log-json=<file>` (JSON array of {target, plugins:{name:..}}).
+  Each detected plugin/technology -> INFO finding {id:"web-tech-<name>",
+  Title:"<name> detected", evidence:brief}. Tech disclosure is informational.
+- nikto_scan: `-Format json -o <file>` (JSON; vulnerabilities list). Each item
+  -> finding {id: item id/OSVDB or "nikto-<n>", Title: msg, Severity: MEDIUM if
+  it names a vuln/OSVDB else INFO, evidence: msg/url}.
+- wpscan_scan: `--format json --output <file>` (JSON). Map wpscan findings:
+  interesting_findings + version/plugin/theme vulnerabilities. Each vulnerability
+  -> finding {id: title/ref, Title, Severity: HIGH if it carries a CVE/references
+  else MEDIUM, evidence, cve when present}. Detected components without a vuln ->
+  INFO.
+- ffuf_scan: `-of json -o <file>` (JSON {results:[{url,status,length,..}]}). Each
+  result -> INFO finding {id:"web-path-<status>-<url-tail>", Title:"<status>
+  <url>", evidence: length/words}.
+- wafw00f_scan: `-o <file> -f json` (JSON). WAF detection -> INFO finding
+  {id:"waf-<name>", Title:"WAF detected: <name>"} or a single "no WAF detected"
+  INFO when none.
+- gobuster_scan: `-o <file>` (text; gobuster has no stable JSON for dir/vhost).
+  Parse each result line -> INFO finding {id:"web-path-<path>", Title: line,
+  evidence: line}. Tolerate the dns/vhost/dir line variants; unknown line -> skip.
+- dirb_scan: `-o <file>` (text). Parse discovered-URL lines (e.g. "+ <url>
+  (CODE:200|SIZE:..)") -> INFO finding {id:"web-path-<url>", Title:url,
+  evidence:line}. Non-result lines skipped.
+
+Mechanism: route each tool through `_run_with_capture(cmd, scanner, target,
+timeout, out_args, parse_fn, suffix)` with scanner = the tool's own name
+("whatweb"/"nikto"/"wpscan"/"ffuf"/"wafw00f"/"gobuster"/"dirb"). Text-output
+tools (gobuster/dirb) get a text parser, not XML/JSON. Add all seven labels to
+the single-ID generate_report allowlist. Keep each tool's validation
+(incl. wordlist checks), command construction, and str return EXACTLY as-is
+except routing through the runner and adding the output flag. Text output
+byte-unchanged (flags write to a file, not stdout — VERIFY).
+
+Invariants (same as prior waves): arg-list command (no shell); the out path is
+server-generated, not caller data; parsers NEVER raise (bad input -> []);
+JSON via stdlib json only (no eval), text parsing bounded; findings redacted
+before persist; 200-line public text bound + opaque ids unchanged; the leading-
+dash target guard and MAX_ARTIFACT_BYTES size cap in the shared runner apply;
+the 42 preserved tool signatures unchanged (NO fixture change).
+
+Test seams (extend tests/test_scanner_adapters.py): each parser maps a
+representative sample to the expected findings/severity; malformed/empty/hostile
+input -> [] no raise; each tool's text return unchanged vs a run_command mock;
+the single-ID report accepts each new scanner. Mock run_command; no real binaries.
+
+Out of scope: the DNS/recon family and the raw-text tail (later waves); deep
+per-tool analysis beyond the mappings above.
