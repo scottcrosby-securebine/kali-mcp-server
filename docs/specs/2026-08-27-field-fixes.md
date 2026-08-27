@@ -181,9 +181,21 @@ reads `Not reported` while `FixedVersion: 2.2.4` sits in the same table.
 reaches the remediation slot, `PrimaryURL`/`References` the reference slot,
 and no nested value is ever rendered as a Python repr.
 
-**Acceptance:** a rendered trivy finding contains no `{'` sequence; the
-remediation slot names the fixed version; report size for a realistic
-multi-CVE result drops materially.
+**What shipped is wider than "trivy", deliberately.** The repr defect lives in
+`rows()`, which fed EVERY key of EVERY finding to `str()`, so nuclei's `info`
+object and nmap's NSE tables hit it too. `flatten()` and `slots()` therefore run
+for every scanner's dict findings, not just trivy's. Operator-visible
+consequences the original issue did not ask for, recorded here rather than left
+to be discovered: `CVSS` collapses to a single V3-preferred score with its
+vector and source feed; `DataSource` is surfaced as `Advisory source`;
+`flatten` caps at 20 items per level and 4 levels deep; the references slot
+shows 25. Every cut is disclosed with `(+N more)`.
+
+**Acceptance:** a rendered trivy finding contains no `{'` sequence ANYWHERE,
+the references slot included; the remediation slot names the fixed version;
+report size for a realistic multi-CVE result drops — see the measurement below,
+which is -11.3% at 151 CVEs and roughly flat at 40, so "materially" holds only
+at the scale the issue was actually reported at.
 
 **Size, measured, and corrected once.** On a 151-CVE fixture carrying
 `Description`, 22 `References`, `CVSS`, `DataSource`, `Layer` and
@@ -210,6 +222,14 @@ scan that never ran is indistinguishable from a clean one.
 **Required:** a non-zero exit reports as a failure, and the normalized result
 `status` reflects it so `generate_report` does not count a failed scan as
 successful coverage.
+
+**Also changed, and required for C1 to be safe:** `_raw_text_parser`'s drop
+rule. It returned `[]` for any text starting with `❌` or `⏱️`. Once a non-zero
+exit arrives under `❌`, that rule would have silently stopped capturing every
+failed raw-text scan, so a failed whois or smbclient would reach the report with
+status `failed`, zero findings, and no explanation of why. The rule now tests
+SUBSTANCE: any status banner with nothing below it is dropped, any banner with a
+body is kept.
 
 **Authorized breakage (D1):** returned text changes for every failing tool.
 Three tests pin the old banner and must be updated:

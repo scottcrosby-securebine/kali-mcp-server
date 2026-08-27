@@ -238,6 +238,18 @@ class ProvenanceAndFlattenTests(unittest.TestCase):
         self.assertIn("ghsa", out)
         self.assertNotIn("{'", out)
 
+    def test_a_dict_valued_reference_is_flattened_not_repred(self):
+        # The references slot str()'d its items, so a dict reference rendered
+        # "{'url': ...}" -- the exact defect #38 fixed, one function away.
+        out = html.unescape(render(self.server, [{"VulnerabilityID": "C", "Title": "t",
+                                                  "Severity": "HIGH",
+                                                  "References": [{"url": "https://x/a", "tag": "advisory"},
+                                                                 "https://plain/b"]}], "trivy"))
+        slot = out.split("References:</strong>")[1].split("</p>")[0]
+        self.assertNotIn("{'", slot)
+        self.assertIn("https://x/a", slot)
+        self.assertIn("https://plain/b", slot)
+
     def test_a_width_cut_says_so(self):
         out = html.unescape(render(self.server, [{"id": "a", "Severity": "INFO", "Title": "t",
                                                   "extracted": [f"i{n}" for n in range(25)]}]))
