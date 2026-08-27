@@ -1303,6 +1303,31 @@ class RawTextCaptureTests(unittest.TestCase):
         ("orphaned key then a complete one",
          "-----BEGIN RSA PRIVATE KEY-----\nKEYLEAK\nfiller\n"
          "-----BEGIN RSA PRIVATE KEY-----\nB\n-----END RSA PRIVATE KEY-----", "KEYLEAK"),
+        # --- #27. Every row below leaked on main. ---
+        # H1: the closer was searched for anywhere in the region, so an
+        # unrelated `@` on a later line vouched for the orphan above it. A
+        # whois record carries an abuse address in nearly every case.
+        ("orphan vouched for by a later unrelated @",
+         "https://svc:PWLEAK\nRegistrar Abuse Contact Email: abuse@registrar.tld", "PWLEAK"),
+        # H2: a keyword line ate the secret's OPENER, and the pattern that
+        # would have caught the body needs an `-----END-----` a hostile server
+        # simply omits. All four shapes the keyword pattern can swallow.
+        ("keyword line eats an unpaired key opener",
+         "password: -----BEGIN PRIVATE KEY-----\nMIIEvKEYLEAK", "MIIEvKEYLEAK"),
+        ("keyword line eats a lowercase unpaired key opener",
+         "secret=-----begin private key-----\nMIIEvKEYLEAK", "MIIEvKEYLEAK"),
+        ("keyword line eats a split JWT opener",
+         "authorization: eyJhbGciOiJIUzI1NiJ9.\neyJzdWIiPAYLOADLEAK", "PAYLOADLEAK"),
+        ("keyword line eats a split URL credential opener",
+         "token: https://svc:\nPWLEAK", "PWLEAK"),
+        # X1: opener TYPES were tried in a fixed order with a return on the
+        # first orphan, so a trailing bare key header made the guard cut THERE
+        # and leave an orphaned JWT earlier in the value intact.
+        ("a later key orphan must not preempt an earlier JWT orphan",
+         "eyJhbGciOiJIUzI1NiJ9.PAYLOADLEAK -----BEGIN PRIVATE KEY-----", "PAYLOADLEAK"),
+        # X2: the port tail was never range checked, so an all-numeric
+        # password passed itself off as a port.
+        ("an out-of-range numeric password is not a port", "https://svc:98765", "98765"),
     )
     REDACTION_MUST_KEEP = (
         ("a plain whois record",
@@ -1318,7 +1343,45 @@ class RawTextCaptureTests(unittest.TestCase):
         ("an msfconsole module list",
          "  exploit/windows/smb/ms17_010_eternalblue  2017-03-14  average\n", "ms17_010_eternalblue"),
         ("a URL with an empty port", "See https://example.com:/path and more", "and more"),
+        # --- #27. Every row below was DESTROYED on main. ---
+        # H3: the port tail accepted only `/ ? #` or end-of-string, so a
+        # legitimate ported URL before any other character was read as an
+        # orphan and everything from the URL onward was cut.
+    ) + tuple(
+        (f"a ported URL terminated by {name}", f"see https://host:8443{tail} then check log", "then check log")
+        for name, tail in (("a double quote", '"'), ("a single quote", "'"), ("a comma", ","),
+                           ("a semicolon", ";"), ("a paren", ")"), ("a bracket", "]"),
+                           ("a space", " "), ("a serialized newline", "\\n"), ("a real newline", "\n"))
+    ) + (
+        # Same defect: the opener fired on `[2001:` inside the IPv6 literal and
+        # the region after it can never look like a port.
+        ("an IPv6 URL with a port", "https://[2001:db8::1]:8443/status", "db8::1]:8443"),
+        # H4/X3: redaction kept the secret's own opener as the `\\1` of
+        # `\\1[REDACTED]`, the guard rematched it, found no closer, and
+        # truncated the rest of the field. All three anchored patterns.
+        ("content after a complete uppercase key",
+         "-----BEGIN PRIVATE KEY-----\nAAA\n-----END PRIVATE KEY-----\nName Server: NS1", "NS1"),
+        ("content after a complete lowercase key",
+         "-----begin private key-----\nAAA\n-----end private key-----\nName Server: NS1", "NS1"),
+        ("content after a complete URL credential",
+         "https://dbadmin:hunter2@db.internal/x and more", "db.internal"),
+        # H6: a JWT's own payload segment is itself a valid JWT opener, so a
+        # well-formed three-segment token was judged an orphan.
+        ("content after a complete JWT",
+         "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhIn0.SIGSIG Name Server: NS1", "NS1"),
     )
+
+    def test_clip_never_exceeds_its_cap(self):
+        """#27 H5. The guard APPENDS its placeholder to an already-sliced
+        string, so a kept opener ending exactly at the boundary returned
+        `limit + 10` and broke a cap the docs call hard. Only the JWT opener
+        can overshoot: the key opener is cut away rather than kept, and a URL
+        cut at its colon takes the port branch."""
+        cap = self.server.MAX_EVIDENCE_CHARS
+        for pad in (cap - 12, cap - 25, cap - 13, cap - 11):
+            with self.subTest(pad=pad):
+                value = "A" * pad + "eyJabcdefgh." + "B" * 500
+                self.assertLessEqual(len(self.server._clip(value, cap)), cap)
 
     def test_redaction_removes_secrets_and_keeps_everything_else(self):
         parse = self.server._raw_text_parser("whois", "example.com")
