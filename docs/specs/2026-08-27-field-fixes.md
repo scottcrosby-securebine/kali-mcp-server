@@ -174,8 +174,10 @@ exactly, including fuzzing a non-path position.
 slash, and an explicit-FUZZ target in a query-parameter position.
 
 **One exemption, added during review.** A bracket-malformed target
-(`x[y]z`, `http://[127.0.0.1]/app?q=1`) makes `urlsplit` raise, and is returned
-UNCHANGED for the scanner to refuse rather than fuzzed. Appending to it would
+(`x[y]z`, `http://[127.0.0.1]/app?q=1`) makes `urlsplit` raise, and is handed to
+the scanner to refuse with NO FUZZ position rather than fuzzed. It still gets
+the scheme default first, so `x[y]z` returns as `http://x[y]z`; only an
+already-schemed target comes back byte-identical. Appending to it would
 place FUZZ after any query, which is the defect this section exists to fix, and
 ffuf's Go parser accepts a bracketed host so it would have run and fuzzed the
 query value. Pinned by `tests/test_wave1_gate.py::FuzzTargetRobustnessTests`.
