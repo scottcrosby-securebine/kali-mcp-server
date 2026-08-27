@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 from pathlib import Path
 import subprocess
@@ -7,6 +8,11 @@ import unittest
 from unittest.mock import patch
 
 from server_test_support import load_server
+
+
+def _xml(value):
+    """Escape a probe secret for an XML attribute without changing its shape."""
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "scanners"
@@ -276,7 +282,7 @@ class NmapCaptureTests(unittest.TestCase):
     def test_tool_text_return_is_unchanged_and_result_is_captured(self):
         captured = {}
 
-        def fake_run(cmd, timeout=None):
+        def fake_run(cmd, timeout=None, **kwargs):
             self.assertNotIn("shell", cmd)
             oxi = cmd.index("-oX")
             # -oX path must precede the "--" separator
@@ -321,7 +327,7 @@ class NmapCaptureTests(unittest.TestCase):
             self.assertNotIn("Error", response)
 
     def test_persist_failure_is_swallowed_and_scan_still_returns_text(self):
-        def fake_run(cmd, timeout=None):
+        def fake_run(cmd, timeout=None, **kwargs):
             Path(cmd[cmd.index("-oX") + 1]).write_text(self.SAMPLE, encoding="utf-8")
             return "nmap text output"
 
@@ -397,7 +403,7 @@ class TlsCaptureTests(unittest.TestCase):
             with self.subTest(tool=tool):
                 captured = {}
 
-                def fake_run(cmd, timeout=None, _flag=flag, _sample=sample):
+                def fake_run(cmd, timeout=None, _flag=flag, _sample=sample, **kwargs):
                     self.assertNotIn("shell", cmd)
                     path = None
                     for i, arg in enumerate(cmd):
@@ -422,7 +428,7 @@ class TlsCaptureTests(unittest.TestCase):
                 self.assertTrue(captured["doc"]["findings"])
 
     def test_tls_persist_failure_is_swallowed(self):
-        def fake_run(cmd, timeout=None):
+        def fake_run(cmd, timeout=None, **kwargs):
             for arg in cmd:
                 if arg.startswith("--xml="):
                     Path(arg.split("=", 1)[1]).write_text(self.SSLSCAN_XML, encoding="utf-8")
@@ -442,7 +448,7 @@ class TlsCaptureTests(unittest.TestCase):
         self.assertEqual([], self.server._parse_testssl_json(bomb))
         self.assertEqual([], self.server._parse_sslyze_json(bomb))
 
-        def fake_run(cmd, timeout=None):
+        def fake_run(cmd, timeout=None, **kwargs):
             for i, arg in enumerate(cmd):
                 if arg == "--jsonfile":
                     Path(cmd[i + 1]).write_text(bomb, encoding="utf-8")
@@ -545,7 +551,7 @@ class WebCaptureTests(unittest.TestCase):
             with self.subTest(tool=tool):
                 captured = {}
 
-                def fake_run(cmd, timeout=None, _flag=flag, _sample=sample):
+                def fake_run(cmd, timeout=None, _flag=flag, _sample=sample, **kwargs):
                     self.assertNotIn("shell", cmd)
                     path = None
                     for i, arg in enumerate(cmd):
@@ -601,15 +607,18 @@ class DnsReconCaptureTests(unittest.TestCase):
         self.assertEqual(2, len(f))  # leading metadata record skipped
         self.assertIn("dns-A-x.com", f)
         self.assertEqual("INFO", f["dns-A-x.com"]["Severity"])
-        am = s._parse_amass_jsonl('{"name":"a.x.com","addresses":[{"ip":"1.1.1.1"}]}\n{"name":"b.x.com"}\nnot json\n')
-        self.assertEqual(["a.x.com", "b.x.com"], [x["Title"] for x in am])  # bad line skipped
+        # amass v5 prints assets under "<type>:" headers; headers, the
+        # run_command status wrapper and error prose are all skipped.
+        am = s._parse_amass_text("Scan completed successfully:\n\nFQDN:\n\na.x.com\nb.x.com\n")
+        self.assertEqual(["a.x.com", "b.x.com"], [x["Title"] for x in am])
+        self.assertEqual([], s._parse_amass_text("flag provided but not defined: -json\n"))
         sf = s._parse_subdomain_lines("a.x.com\nb.x.com\n\n")
         self.assertEqual(["a.x.com", "b.x.com"], [x["Title"] for x in sf])
 
     def test_parsers_never_raise(self):
         s = self.server
         # JSON parsers: bad input -> [].
-        for parser in (s._parse_dnsrecon_json, s._parse_amass_jsonl):
+        for parser in (s._parse_dnsrecon_json, s._parse_amass_text):
             for payload in ("", "garbage", "{bad", None, 42, "[" * 40000 + "]" * 40000):
                 with self.subTest(parser=parser.__name__, payload=repr(payload)[:12]):
                     self.assertEqual([], parser(payload))
@@ -620,19 +629,23 @@ class DnsReconCaptureTests(unittest.TestCase):
         self.assertIsInstance(s._parse_subdomain_lines("anything\ngoes"), list)
 
     def test_tools_return_text_unchanged_and_capture(self):
+        # flag=None means the tool adds NO argument and capture parses the
+        # tool's own text (amass v5 has no per-run structured output).
         cases = [
             ("dns_recon", "dns_recon", "-j", json.dumps([{"type": "A", "name": "x.com", "address": "1.1.1.1"}]), ("x.com",)),
             ("subfinder_scan", "subfinder", "-o", "a.x.com\nb.x.com", ("x.com",)),
-            ("amass_enum", "amass", "-json", '{"name":"a.x.com"}', ("x.com",)),
+            ("amass_enum", "amass", None, "FQDN:\n\na.x.com\n", ("x.com",)),
         ]
         for tool, scanner, flag, sample, args in cases:
             with self.subTest(tool=tool):
                 captured = {}
 
-                def fake_run(cmd, timeout=None, _flag=flag, _sample=sample):
+                def fake_run(cmd, timeout=None, _flag=flag, _sample=sample, _c=captured, **kwargs):
                     self.assertNotIn("shell", cmd)
-                    path = cmd[cmd.index(_flag) + 1]
-                    Path(path).write_text(_sample, encoding="utf-8")
+                    _c["argv"] = list(cmd)
+                    if _flag is None:
+                        return _sample  # capture reads the returned text
+                    Path(cmd[cmd.index(_flag) + 1]).write_text(_sample, encoding="utf-8")
                     return f"{scanner} TEXT"
 
                 def fake_write(document, _c=captured):
@@ -644,9 +657,418 @@ class DnsReconCaptureTests(unittest.TestCase):
                     patch.object(self.server, "_write_scanner_result", fake_write),
                 ):
                     out = asyncio.run(getattr(self.server, tool)(*args))
-                self.assertEqual(f"{scanner} TEXT", out)
+                self.assertEqual(sample if flag is None else f"{scanner} TEXT", out)
                 self.assertEqual(scanner, captured["doc"]["scanner"])
                 self.assertTrue(captured["doc"]["findings"])
+
+    # amass v5 has no structured-output flag: -json was removed and -oA is
+    # registered but never read, so passing one turns every scan into a usage
+    # error merged into the operator's text.
+    def test_amass_adds_no_argument(self):
+        captured = {}
+
+        def fake_run(cmd, timeout=None, **kwargs):
+            captured["argv"] = list(cmd)
+            return "FQDN:\n\na.x.com\n"
+
+        with (
+            patch.object(self.server, "run_command", fake_run),
+            patch.object(self.server, "_write_scanner_result", lambda d: "Z" * 32),
+        ):
+            asyncio.run(self.server.amass_enum("x.com"))
+        self.assertEqual(["amass", "enum", "-passive", "-d", "x.com"], captured["argv"])
+
+    # dnsrecon logs "Saving records to JSON file: <path>" to stderr, which
+    # run_command merges. That line exists only because capture asked for it
+    # and it discloses a server-internal path. Mock execute_command, NOT
+    # run_command: the strip lives inside run_command and must happen before
+    # its 200-line bound, so a run_command mock would prove nothing.
+    def test_capture_path_never_reaches_operator_text(self):
+        seen = {}
+
+        def fake_exec(cmd, timeout=None, **kwargs):
+            path = cmd[cmd.index("-j") + 1]
+            seen["path"] = path
+            Path(path).write_text(json.dumps([{"type": "A", "name": "x.com", "address": "1.1.1.1"}]), encoding="utf-8")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="real record line\ntrailing line\n",
+                stderr=f"2026-01-01 INFO Saving records to JSON file: {path}\n")
+
+        with (
+            patch.object(self.server, "execute_command", fake_exec),
+            patch.object(self.server, "_write_scanner_result", lambda d: "Z" * 32),
+        ):
+            out = asyncio.run(self.server.dns_recon("x.com"))
+        self.assertNotIn(seen["path"], out)
+        self.assertNotIn("Saving records to JSON file", out)
+        self.assertIn("real record line", out)
+
+    # The strip must run BEFORE run_command's MAX_OUTPUT_LINES bound, or the
+    # "(truncated N additional lines)" counter still reports the removed line
+    # and the operator's text differs from an unflagged run.
+    def test_stripped_line_does_not_shift_the_truncation_counter(self):
+        body = "\n".join(f"record {index}" for index in range(self.server.MAX_OUTPUT_LINES + 59))
+
+        def exec_for(flagged):
+            def fake_exec(cmd, timeout=None, **kwargs):
+                stderr = ""
+                if flagged:
+                    path = cmd[cmd.index("-j") + 1]
+                    Path(path).write_text(json.dumps([{"type": "A", "name": "x.com"}]), encoding="utf-8")
+                    stderr = f"2026-01-01 INFO Saving records to JSON file: {path}\n"
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=body, stderr=stderr)
+            return fake_exec
+
+        with (
+            patch.object(self.server, "execute_command", exec_for(True)),
+            patch.object(self.server, "_write_scanner_result", lambda d: "Z" * 32),
+        ):
+            captured = asyncio.run(self.server.dns_recon("x.com"))
+        with patch.object(self.server, "execute_command", exec_for(False)):
+            plain = self.server.run_command(["dnsrecon", "-d", "x.com"])
+        self.assertEqual(plain, captured)
+
+    # _redact_scanner_data only sees a secret-named key while the value is
+    # still a dict, and only sees a pattern's trailing anchor while the value
+    # is untruncated. Serializing or slicing first silently disables it.
+    def test_secrets_redacted_before_serialization(self):
+        s = self.server
+        rec = {"type": "TXT", "name": "v.x.com", "password": "Hunter2LEAK", "api_key": "KEYLEAK"}
+        dns = s._parse_dnsrecon_json(json.dumps([{"arguments": "meta"}, rec]))
+        self.assertNotIn("Hunter2LEAK", json.dumps(dns))
+        self.assertNotIn("KEYLEAK", json.dumps(dns))
+        self.assertIn("[REDACTED]", dns[0]["evidence"])
+        # A private key whose END anchor falls past the evidence cut.
+        key = {"name": "k", "key": "-----BEGIN RSA PRIVATE KEY-----\n" + "LEAKBODY" * 40 + "\n-----END RSA PRIVATE KEY-----"}
+        self.assertNotIn("LEAKBODY", json.dumps(s._parse_dnsrecon_json(json.dumps([{"arguments": "m"}, key]))))
+        # id[:80] and Title[:200] must not disagree about one secret: the '@'
+        # anchor lands exactly on the id cut at this password length.
+        finding = s._parse_subdomain_lines("https://svcacct:" + "P" * 64 + "@h.x.com")[0]
+        self.assertNotIn("PPPPPPPPPPPPPPPPPPPP", finding["id"])
+        self.assertNotIn("PPPPPPPPPPPPPPPPPPPP", finding["Title"])
+
+    # Uncapped id/Title let a hostile artifact stall the response while the
+    # redactor walks megabytes, and store a multi-megabyte finding. Redaction
+    # still runs first (it must), but on a bounded prefix.
+    def test_json_parser_fields_are_bounded(self):
+        s = self.server
+        big = "n" * (2 * 1024 * 1024)
+        cases = {
+            "dnsrecon": s._parse_dnsrecon_json(json.dumps([{"arguments": "m"}, {"type": "A", "name": big}])),
+            "amass": s._parse_amass_text(big + ".x.com"),
+            "subfinder": s._parse_subdomain_lines(big),
+        }
+        for scanner, findings in cases.items():
+            with self.subTest(scanner=scanner):
+                self.assertTrue(findings)
+                self.assertLessEqual(len(findings[0]["id"]), self.server.MAX_ID_CHARS)
+                self.assertLessEqual(len(findings[0]["Title"]), self.server.MAX_TITLE_CHARS)
+
+    # A truncation can cut a secret's CLOSING anchor out of reach, and the
+    # attacker picks the distance, so no pre-slice bound is "far enough".
+    # Every capped field goes through _clip, which redacts an orphaned opener.
+    def test_secret_survives_no_truncation_distance(self):
+        s = self.server
+        for body in (8000, 8200, 200_000):
+            with self.subTest(pem_body=body):
+                record = {"name": "k", "strings": "-----BEGIN RSA PRIVATE KEY-----\n" + "LEAKBODY" * (body // 8) + "\n-----END RSA PRIVATE KEY-----"}
+                parsed = s._parse_dnsrecon_json(json.dumps([{"arguments": "m"}, record]))
+                self.assertNotIn("LEAKBODY", json.dumps(parsed))
+        for password in (64, 8200, 100_000):
+            with self.subTest(password=password):
+                finding = s._parse_subdomain_lines("https://svcacct:" + "P" * password + "@h.x.com")[0]
+                self.assertNotIn("P" * 20, finding["id"])
+                self.assertNotIn("P" * 20, finding["Title"])
+
+    # _clip must be correct on its own, not only after _redact_scanner_data has
+    # already consumed the complete key pairs: only the LAST opener can be the
+    # orphan, so the guard uses rfind.
+    def test_clip_is_correct_without_prior_redaction(self):
+        clip = self.server._clip
+        complete = "-----BEGIN A PRIVATE KEY-----\nL1BODY-----END A PRIVATE KEY-----\n"
+        self.assertNotIn("L2BODY", clip(complete + "-----BEGIN B PRIVATE KEY-----\nL2BODY" + "X" * 300, 300))
+        self.assertEqual("[REDACTED]", clip("-----BEGIN RSA PRIVATE KEY-----\nLEAKBODY" + "X" * 400, 300))
+        self.assertNotIn("LEAKBODY", clip("-----END RSA PRIVATE KEY-----\n-----BEGIN RSA PRIVATE KEY-----\nLEAKBODY" + "X" * 300, 300))
+        self.assertNotIn("LEAKPW", clip("https://user:LEAKPW" + "X" * 500 + "@h.com", 300))
+        # An unrelated later '@' must not be mistaken for the credential anchor.
+        self.assertNotIn("LEAKPW", clip("https://user:LEAKPW" + "X" * 300 + " note@example.com", 300))
+        # All THREE anchor-dependent patterns, not just PEM: the JWT needs its
+        # signature segment and the URL credential needs its '@'.
+        long_jwt = "eyJhbGciOiJIUzI1NiJ9." + "eyJwYXNzd29yZCI6IkxFQUtQQVlMT0FEIn0" * 400 + ".sig"
+        self.assertNotIn("eyJwYXNzd29yZCI", clip(long_jwt, 300))
+        # ...and always the LAST opener, for every pattern, not only PEM.
+        self.assertNotIn("LEAKPW", clip("https://a:goodpw@h1.com/https://b:LEAKPW" + "X" * 300, 300))
+        self.assertNotIn("LEAKJWT", clip("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig eyJhbGciOiJIUzI1NiJ9.LEAKJWT" + "X" * 300, 300))
+        # A complete, untruncated key is left for _redact_scanner_data.
+        self.assertIn("-----END ", clip("-----BEGIN RSA PRIVATE KEY-----\nBODY-----END RSA PRIVATE KEY-----", 300))
+        for value in (None, 42, 3.5, True):
+            with self.subTest(value=value):
+                self.assertIsInstance(clip(value, 50), str)
+
+    # The web parsers carry the same defects and the same fixes as the DNS
+    # ones. Only the dict-key half of _redact_scanner_data catches a cookie in
+    # a whatweb plugin body: a Python dict repr puts a quote between the key
+    # and the colon, so the value patterns cannot match it.
+    def test_web_parsers_redact_before_serializing_and_bound_fields(self):
+        s = self.server
+        whatweb = s._parse_whatweb_json(json.dumps([{"target": "t", "plugins": {"p": {"Set-Cookie": "sid=SUPERSECRET"}}}]))
+        self.assertNotIn("SUPERSECRET", json.dumps(whatweb))
+        nikto = s._parse_nikto_json(json.dumps({"vulnerabilities": [
+            {"OSVDB": "1", "msg": "b" * 5000, "url": "https://u:NIKTOLEAK@h.com"}]}))
+        self.assertNotIn("NIKTOLEAK", json.dumps(nikto))
+        self.assertLessEqual(len(nikto[0]["Title"]), self.server.MAX_TITLE_CHARS)
+        ffuf = s._parse_ffuf_json(json.dumps({"results": [{"url": "https://u:FFUFLEAK@h.com/" + "c" * 5000, "status": 200}]}))
+        self.assertNotIn("FFUFLEAK", json.dumps(ffuf))
+        self.assertLessEqual(len(ffuf[0]["Title"]), self.server.MAX_TITLE_CHARS)
+
+    # ffuf's banner prints an "Output file" line AND a "File format" line to
+    # stderr whenever -o is set; stripping only the path leaves the second.
+    def test_ffuf_capture_banner_is_fully_stripped(self):
+        def exec_for(flagged):
+            def fake_exec(cmd, timeout=None, **kwargs):
+                stderr = ""
+                if flagged:
+                    path = cmd[cmd.index("-o") + 1]
+                    Path(path).write_text(json.dumps({"results": []}), encoding="utf-8")
+                    stderr = f" :: Output file       : {path}\n :: File format      : json\n"
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="banner\nresult line\n", stderr=stderr)
+            return fake_exec
+
+        with (
+            patch.object(self.server, "execute_command", exec_for(True)),
+            patch.object(self.server, "_write_scanner_result", lambda d: "Z" * 32),
+        ):
+            captured = asyncio.run(self.server.ffuf_scan("http://h/FUZZ"))
+        with patch.object(self.server, "execute_command", exec_for(False)):
+            plain = self.server.run_command(["ffuf", "-u", "http://h/FUZZ"])
+        self.assertEqual(plain, captured)
+
+    # sslyze writes '\n       Wrote JSON output to "<path>".\n' -- a blank line
+    # AND a path line, both only because capture asked for the file. Stripping
+    # the path line alone leaves the blank and shifts the truncation counter.
+    def test_sslyze_capture_announcement_including_its_blank_line_is_stripped(self):
+        for line_count in (3, self.server.MAX_OUTPUT_LINES + 50):
+            with self.subTest(lines=line_count):
+                body = "\n".join(f"L{index}" for index in range(line_count)) + "\n"
+
+                def exec_for(flagged):
+                    def fake_exec(cmd, timeout=None, **kwargs):
+                        stderr = ""
+                        if flagged:
+                            path = [a.split("=", 1)[1] for a in cmd if a.startswith("--json_out=")][0]
+                            Path(path).write_text("{}", encoding="utf-8")
+                            stderr = f'\n       Wrote JSON output to "{path}".\n'
+                        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=body, stderr=stderr)
+                    return fake_exec
+
+                with (
+                    patch.object(self.server, "execute_command", exec_for(True)),
+                    patch.object(self.server, "_write_scanner_result", lambda d: "Z" * 32),
+                ):
+                    captured = asyncio.run(self.server.sslyze_scan("h", "443"))
+                with patch.object(self.server, "execute_command", exec_for(False)):
+                    plain = self.server.run_command(["sslyze", "h:443"])
+                self.assertEqual(plain, captured)
+
+    # nikto treats -o as a PREFIX and appends ".$fmt" unless the path already
+    # ends in it, so the capture suffix and the -Format value are coupled.
+    def test_nikto_capture_suffix_matches_its_output_format(self):
+        seen = {}
+
+        def fake_exec(cmd, timeout=None, **kwargs):
+            seen["argv"] = list(cmd)
+            path = cmd[cmd.index("-o") + 1]
+            Path(path).write_text(json.dumps({"vulnerabilities": []}), encoding="utf-8")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="nikto\n", stderr="")
+
+        with (
+            patch.object(self.server, "execute_command", fake_exec),
+            patch.object(self.server, "_write_scanner_result", lambda d: "Z" * 32),
+        ):
+            asyncio.run(self.server.nikto_scan("h", "80"))
+        argv = seen["argv"]
+        self.assertEqual("json", argv[argv.index("-Format") + 1])
+        self.assertTrue(argv[argv.index("-o") + 1].endswith(".json"))
+
+    # Structural sweep. Every finding-producing function must redact and bound,
+    # whatever wave it came from. An enumerated list is what let _parse_paths_text
+    # and _parse_wafw00f_json keep leaking while six siblings were fixed, so this
+    # DISCOVERS them instead of naming them. Each probe puts the secret in EVERY
+    # scanner-controlled field, not one: probing a single field is what let
+    # sslscan's `sslversion`/`bits` and sslyze's `label` slip through a green run.
+    PARSER_PROBES = {
+        "_parse_dnsrecon_json": lambda secret: json.dumps([{"arguments": "m"}, {"type": secret, "name": secret, "address": secret, "extra": [secret], "nested": {"k": secret}}]),
+        "_parse_amass_text": lambda secret: secret + ".x.com",
+        "_parse_subdomain_lines": lambda secret: secret + ".x.com",
+        "_parse_paths_text": lambda secret: "/a?" + secret,
+        "_parse_whatweb_json": lambda secret: json.dumps([{"target": secret, "plugins": {secret: {"k": secret, "nested": [secret]}}}]),
+        "_parse_nikto_json": lambda secret: json.dumps({"vulnerabilities": [{"OSVDB": secret, "msg": secret, "url": secret, "nested": [secret]}]}),
+        "_parse_ffuf_json": lambda secret: json.dumps({"results": [{"url": "http://h/?" + secret, "input": secret, "status": 200, "nested": [secret]}]}),
+        "_parse_wafw00f_json": lambda secret: json.dumps([{"detected": True, "firewall": secret, "manufacturer": secret, "nested": [secret]}]),
+        "_parse_testssl_json": lambda secret: json.dumps([{"id": secret, "severity": "HIGH", "finding": secret, "cve": [secret]}]),
+        "_parse_sslyze_json": lambda secret: json.dumps({"server_scan_results": [{"scan_result": {f"{secret}_cipher_suites": {"result": {"accepted_cipher_suites": [{"cipher_suite": {"name": secret}}]}}}}]}),
+        "_parse_sslscan_xml": lambda secret: f'<document><ssltest><protocol type="ssl" version="{_xml(secret)}" enabled="1"/><cipher status="accepted" sslversion="{_xml(secret)}" bits="{_xml(secret)}" cipher="{_xml(secret)}"/></ssltest></document>',
+        "_parse_nmap_xml": lambda secret: f'<nmaprun><host><ports><port portid="80" protocol="tcp"><state state="open"/><service name="{_xml(secret)}" product="{_xml(secret)}" version="{_xml(secret)}"/><script id="{_xml(secret)}" output="{_xml(secret)}"/></port></ports></host></nmaprun>',
+    }
+    # Reached through a probe above rather than called directly.
+    PROBED_ELSEWHERE = {"_nmap_script_finding", "_run_nuclei_capture"}
+
+    # nuclei is not a _parse_* function and was missed by the first version of
+    # the discovery filter -- it was also the one leaking, via a nested list of
+    # strings lifted straight out of the scanned target's response body.
+    def test_nuclei_findings_are_redacted_at_every_depth(self):
+        secrets = {
+            "cert-closed key": "-----BEGIN RSA PRIVATE KEY-----" + "LEAKBODY" * 80 + "-----END CERTIFICATE-----",
+            "over-bound key": "-----BEGIN RSA PRIVATE KEY-----" + "LEAKBODY" * 1500 + "-----END RSA PRIVATE KEY-----",
+            "keyword": "password=Hunter2LEAK",
+        }
+        for label, secret in secrets.items():
+            with self.subTest(secret=label):
+                line = json.dumps({"template-id": "t", "host": "http://h",
+                                   "extracted-results": [secret], "nested": {"k": [secret]},
+                                   "info": {"severity": "critical", "name": secret}})
+
+                def fake_exec(cmd, timeout=None, **kwargs):
+                    return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=line, stderr="")
+
+                with tempfile.TemporaryDirectory() as root_text:
+                    root = Path(root_text)
+                    with (
+                        patch.object(self.server, "execute_command", fake_exec),
+                        patch.object(self.server, "RESULTS_ROOT", root),
+                    ):
+                        text = asyncio.run(self.server.nuclei_scan("http://h"))
+                    stored = "".join(path.read_text(encoding="utf-8") for path in root.glob("*.json"))
+                self.assertNotIn("LEAKBODY", text)
+                self.assertNotIn("Hunter2LEAK", text)
+                self.assertNotIn("LEAKBODY", stored)
+                self.assertNotIn("Hunter2LEAK", stored)
+
+    def test_every_finding_parser_is_covered_by_a_probe(self):
+        produces = set()
+        for name in dir(self.server):
+            attribute = getattr(self.server, name)
+            if name.startswith("_") and inspect.isfunction(attribute):
+                source = inspect.getsource(attribute)
+                if "findings.append" in source or "return _clip_finding" in source:
+                    produces.add(name)
+        self.assertEqual(set(), produces - set(self.PARSER_PROBES) - self.PROBED_ELSEWHERE,
+                         "finding-producing function added with no redaction probe")
+
+    def test_every_finding_parser_redacts_and_bounds(self):
+        # A keyword secret, and a private key closed by a CERTIFICATE trailer
+        # (which SECRET_VALUE_PATTERNS' private-key pattern does not match).
+        secrets = {
+            "keyword": "password=Hunter2LEAK",
+            "cert-closed key": "-----BEGIN RSA PRIVATE KEY-----" + "LEAKBODY" * 80 + "-----END CERTIFICATE-----",
+            "fake end": "-----BEGIN RSA PRIVATE KEY-----" + "LEAKBODY" * 20 + "-----END X-----" + "Z" * 9000,
+        }
+        for name, build in self.PARSER_PROBES.items():
+            for label, secret in secrets.items():
+                with self.subTest(parser=name, secret=label):
+                    rendered = json.dumps(getattr(self.server, name)(build(secret)))
+                    self.assertNotIn("Hunter2LEAK", rendered)
+                    self.assertNotIn("LEAKBODY", rendered)
+        caps = {"id": self.server.MAX_ID_CHARS, "Title": self.server.MAX_TITLE_CHARS}
+        for name, build in self.PARSER_PROBES.items():
+            with self.subTest(parser=name, case="bounded"):
+                for finding in getattr(self.server, name)(build("n" * 300_000)):
+                    for key, value in finding.items():
+                        if isinstance(value, str):
+                            cap = caps.get(key, self.server.MAX_EVIDENCE_CHARS)
+                            self.assertLessEqual(len(value), cap, f"{name}.{key} unbounded")
+
+    # id is the combined report's dedupe key. It must clear a full 253-char
+    # FQDN plus a prefix, or distinct findings silently merge into one.
+    def test_long_but_legitimate_values_stay_distinct(self):
+        s = self.server
+        label = "a" * 63
+        names = [f"{label}.{label}.x{n}.example.com" for n in (1, 2)]
+        records = [{"type": "A", "name": n, "address": "1.1.1.1"} for n in names]
+        findings = s._parse_dnsrecon_json(json.dumps([{"arguments": "m"}] + records))
+        self.assertEqual(2, len({f["id"] for f in findings}))
+        # A ported URL is an authority, not a credential: five ffuf hits on one
+        # host:port must stay five findings, and the path must survive.
+        hits = [{"url": f"http://target.local:8080/p{n}", "status": 200} for n in range(5)]
+        ffuf = s._parse_ffuf_json(json.dumps({"results": hits}))
+        self.assertEqual(5, len({f["id"] for f in ffuf}))
+        self.assertIn("http://target.local:8080/p0", ffuf[0]["Title"])
+        for url in ("http://example.com:8080/admin", "https://target.local:8443/", "http://10.0.0.5:8080/backup"):
+            with self.subTest(url=url):
+                self.assertEqual(url, s._clip(url, s.MAX_EVIDENCE_CHARS))
+        # ...but a truncated credential is still redacted.
+        self.assertNotIn("PWLEAK", s._clip("https://svcacct:PWLEAK" + "X" * 9000, 300))
+
+    # NSE script output and testssl findings are the operator-facing substance
+    # and were unbounded before capture; they must not be cut to a fifth of a page.
+    def test_evidence_keeps_multi_kilobyte_tool_output(self):
+        s = self.server
+        nse = "| ssl-enum-ciphers:\n" + "|     TLS_RSA_WITH_AES_128_CBC_SHA - A\n" * 40
+        self.assertGreater(len(nse), 1300)
+        xml = f'<nmaprun><host><ports><port portid="443" protocol="tcp"><state state="open"/><script id="ssl-enum-ciphers" output="{nse}"/></port></ports></host></nmaprun>'
+        evidence = [f for f in s._parse_nmap_xml(xml) if f["id"] == "ssl-enum-ciphers"][0]["evidence"]
+        self.assertEqual(len(nse), len(evidence))
+        finding = "x" * 1812
+        self.assertEqual(1812, len(s._parse_testssl_json(json.dumps([{"id": "c", "severity": "LOW", "finding": finding}]))[0]["evidence"]))
+
+    # Helper-level contracts. Each of these is currently also covered by a
+    # parser path, but the recurring defect in this feature has been a helper
+    # that is only safe because of what its caller happens to do next, so each
+    # is pinned where it is defined.
+    def test_bounded_for_redaction_never_emits_an_orphaned_anchor(self):
+        bound = self.server.MAX_REDACT_CHARS
+        key = "-----BEGIN RSA PRIVATE KEY-----" + "LEAKBODY" * (bound // 4) + "-----END RSA PRIVATE KEY-----"
+        for label, value in (("bare", key), ("nested", {"a": [{"b": key}]})):
+            with self.subTest(shape=label):
+                self.assertNotIn("LEAKBODY", json.dumps(self.server._bounded_for_redaction(value)))
+
+    def test_truncation_guard_is_local_to_each_opener(self):
+        clip = self.server._clip
+        # A complete secret must not vouch for a later orphaned one...
+        self.assertNotIn("L2BODY", clip(
+            "-----BEGIN A PRIVATE KEY-----x-----END A PRIVATE KEY-----"
+            "-----BEGIN B PRIVATE KEY-----L2BODY" + "X" * 300, 400))
+        # ...nor a later complete one for an EARLIER orphan.
+        self.assertNotIn("ORPHANPW", clip("https://a:ORPHANPW notes https://b:realpw@h.com", 400))
+        self.assertNotIn("ORPHANJWT", clip(
+            "eyJhbGciOiJIUzI1NiJ9.ORPHANJWT and eyJhbGciOiJIUzI1NiJ9.p.s", 400))
+        # A ported URL is still not a credential, even beside a real one.
+        self.assertIn("http://h:8080/x", clip("http://h:8080/x", 400))
+
+    # dirb's OUTPUT_FILE line follows its banner's OWN trailing blank, so
+    # collapsing a blank above every stripped line eats legitimate output.
+    # sslyze's blank belongs to its announcement. Opposite handling, same code.
+    def test_blank_collapse_is_opt_in_per_tool(self):
+        banner = "\n-----------------\nDIRB v2.22\n-----------------\n\n"
+
+        def exec_for(flagged):
+            def fake_exec(cmd, timeout=None, **kwargs):
+                stdout = banner + ("" if not flagged else f"OUTPUT_FILE: {cmd[cmd.index('-o') + 1]}\n") + "START_TIME: now\n"
+                if flagged:
+                    Path(cmd[cmd.index("-o") + 1]).write_text("/a\n", encoding="utf-8")
+                return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=stdout, stderr="")
+            return fake_exec
+
+        with (
+            patch.object(self.server, "execute_command", exec_for(True)),
+            patch.object(self.server, "_write_scanner_result", lambda d: "Z" * 32),
+        ):
+            captured = asyncio.run(self.server.dirb_scan("http://h"))
+        with patch.object(self.server, "execute_command", exec_for(False)):
+            plain = self.server.run_command(["dirb", "http://h"])
+        self.assertEqual(plain, captured)
+
+    # amass v5 printScope lists one host under several asset types, and the id
+    # is derived from the host alone.
+    def test_amass_assets_are_deduped_and_paths_rejected(self):
+        s = self.server
+        self.assertEqual(["subdomain-x.com"], [f["id"] for f in s._parse_amass_text("DomainRecord:\n\nx.com\n\nFQDN:\n\nx.com\n")])
+        for accepted in ("93.184.216.0/24", "*.dev.x.com", "_dmarc.x.com", "2606:2800:220:1::1"):
+            with self.subTest(asset=accepted):
+                self.assertTrue(s._parse_amass_text(accepted))
+        for rejected in ("https://www.x.com/login", "/usr/share/wordlists/dirb/common.txt", "../../etc/passwd", "./"):
+            with self.subTest(asset=rejected):
+                self.assertEqual([], s._parse_amass_text(rejected))
 
     def test_single_id_report_accepts_dns_scanners(self):
         for scanner in ("dns_recon", "subfinder", "amass"):
