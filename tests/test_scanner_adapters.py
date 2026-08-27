@@ -911,7 +911,11 @@ class DnsReconCaptureTests(unittest.TestCase):
         "_parse_nmap_xml": lambda secret: f'<nmaprun><host><ports><port portid="80" protocol="tcp"><state state="open"/><service name="{_xml(secret)}" product="{_xml(secret)}" version="{_xml(secret)}"/><script id="{_xml(secret)}" output="{_xml(secret)}"/></port></ports></host></nmaprun>',
     }
     # Reached through a probe above rather than called directly.
-    PROBED_ELSEWHERE = {"_nmap_script_finding", "_run_nuclei_capture"}
+    # Reached through a probe above rather than called directly, or a factory
+    # the uniform one-argument probe cannot build: `_raw_text_parser` takes
+    # (scanner, target) and is covered by RawTextCaptureTests
+    # .test_parser_redacts_and_bounds, which runs the same three secret shapes.
+    PROBED_ELSEWHERE = {"_nmap_script_finding", "_run_nuclei_capture", "_raw_text_parser"}
 
     # nuclei is not a _parse_* function and was missed by the first version of
     # the discovery filter -- it was also the one leaking, via a nested list of
@@ -962,6 +966,14 @@ class DnsReconCaptureTests(unittest.TestCase):
             "keyword": "password=Hunter2LEAK",
             "cert-closed key": "-----BEGIN RSA PRIVATE KEY-----" + "LEAKBODY" * 80 + "-----END CERTIFICATE-----",
             "fake end": "-----BEGIN RSA PRIVATE KEY-----" + "LEAKBODY" * 20 + "-----END X-----" + "Z" * 9000,
+            # Shapes wave 5 exposed. They leaked through EVERY parser here, not
+            # just the new one, because the defect was in the shared helpers.
+            # ONE line each: a multi-line probe fed to a line-per-host parser
+            # (amass, subfinder) yields hostname-shaped fragments, which is that
+            # parser working correctly on garbage rather than a leak.
+            "lowercase orphan key": "-----begin private key-----LEAKBODY",
+            "key opener on a keyword line":
+                "password: -----BEGIN PRIVATE KEY-----LEAKBODY-----END PRIVATE KEY-----",
         }
         for name, build in self.PARSER_PROBES.items():
             for label, secret in secrets.items():
@@ -1089,6 +1101,347 @@ class DnsReconCaptureTests(unittest.TestCase):
                     ):
                         response = asyncio.run(self.server.generate_report("A" * 32))
                     self.assertNotIn("Error", response)
+
+
+# === P2 wave 5: raw-text tail ===
+# whois, nbtscan, smb_enum, metasploit search/info and fierce have no structured
+# output of any kind, so capture parses the operator's own text through the
+# out_args=None mode built for amass. responder_analyze is deliberately NOT
+# wired: it spawns no subprocess and returns a constant.
+class RawTextCaptureTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    # (tool, capture label, call args, the target the id/Title must carry)
+    WIRED = [
+        ("whois_lookup", "whois", ("example.com",), "example.com"),
+        ("nbtscan_scan", "nbtscan", ("192.168.1.0/24",), "192.168.1.0/24"),
+        ("smb_enum", "smbclient", ("10.0.0.5",), "10.0.0.5"),
+        ("metasploit_search", "metasploit_search", ("eternalblue",), "eternalblue"),
+        ("metasploit_info", "metasploit_info", ("exploit/windows/smb/ms17_010",), "exploit/windows/smb/ms17_010"),
+        ("fierce_scan", "fierce", ("example.com",), "example.com"),
+    ]
+
+    def test_parser_maps_text_to_one_info_finding(self):
+        parse = self.server._raw_text_parser("whois", "example.com")
+        findings = parse("✅ Scan completed successfully:\n\nRegistrar: Example Inc\nStatus: ok")
+        self.assertEqual(1, len(findings))
+        finding = findings[0]
+        self.assertEqual("INFO", finding["Severity"])
+        self.assertIn("example.com", finding["id"])
+        self.assertIn("whois", finding["id"])
+        self.assertIn("Registrar: Example Inc", finding["evidence"])
+
+    def test_parser_never_raises_and_drops_failures(self):
+        parse = self.server._raw_text_parser("whois", "x.com")
+        # Nothing to capture: empty, whitespace, non-string, and the two hard
+        # failure markers -- persisting an error string as an INFO finding would
+        # put a bogus card in the report.
+        for payload in ("", "   \n ", None, 42, [],
+                        "❌ Error: Command not found. Tool may not be installed: whois",
+                        "⏱️ Command timed out after 60 seconds. Try reducing scan scope."):
+            with self.subTest(payload=repr(payload)[:24]):
+                self.assertEqual([], parse(payload))
+        # ⚠️ is a real run that exited non-zero WITH output: keep it.
+        self.assertEqual(1, len(parse("⚠️ Scan completed with warnings:\n\nNo match for domain")))
+
+    def test_parser_redacts_and_bounds(self):
+        parse = self.server._raw_text_parser("whois", "x.com")
+        secrets = {
+            "keyword": "password=Hunter2LEAK",
+            "cert-closed key": "-----BEGIN RSA PRIVATE KEY-----" + "LEAKBODY" * 80 + "-----END CERTIFICATE-----",
+            "fake end": "-----BEGIN RSA PRIVATE KEY-----" + "LEAKBODY" * 20 + "-----END X-----" + "Z" * 9000,
+        }
+        for label, secret in secrets.items():
+            with self.subTest(secret=label):
+                rendered = json.dumps(parse("Contact: " + secret))
+                self.assertNotIn("Hunter2LEAK", rendered)
+                self.assertNotIn("LEAKBODY", rendered)
+        # A hostile target reaches id and Title, so it is redacted there too.
+        hostile = self.server._raw_text_parser("whois", "password=Hunter2LEAK")("body")
+        self.assertNotIn("Hunter2LEAK", json.dumps(hostile))
+        # Bounded at the same caps every other parser uses. The TARGET must be
+        # long too: `Title` and `id` are built from it, so a short-target probe
+        # leaves their caps untested (dropping the Title cap changed nothing).
+        caps = {"id": self.server.MAX_ID_CHARS, "Title": self.server.MAX_TITLE_CHARS}
+        long_target = self.server._raw_text_parser("whois", "t" * 300_000)
+        for finding in long_target("body"):
+            for key, value in finding.items():
+                if isinstance(value, str):
+                    self.assertLessEqual(len(value), caps.get(key, self.server.MAX_EVIDENCE_CHARS),
+                                         f"raw parser .{key} unbounded for a long target")
+        for finding in parse("n" * 300_000):
+            for key, value in finding.items():
+                if isinstance(value, str):
+                    self.assertLessEqual(len(value), caps.get(key, self.server.MAX_EVIDENCE_CHARS),
+                                         f"raw parser .{key} unbounded")
+
+    # The whole point of the wave: the operator's text must be byte-identical to
+    # a run without capture. Mock execute_command, not run_command -- the strip
+    # and the 200-line bound both live inside run_command.
+    def test_wired_tools_return_text_byte_unchanged_and_capture(self):
+        body = "line one\nline two\n"
+        for tool, scanner, args, target in self.WIRED:
+            with self.subTest(tool=tool):
+                seen = {}
+
+                def fake_exec(cmd, timeout=None, **kwargs):
+                    seen.setdefault("argv", []).append(list(cmd))
+                    return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=body, stderr="")
+
+                captured = {}
+                with (
+                    patch.object(self.server, "execute_command", fake_exec),
+                    patch.object(self.server, "_write_scanner_result", lambda d: captured.setdefault("doc", d) and "Z" * 32),
+                ):
+                    text = asyncio.run(getattr(self.server, tool)(*args))
+                # The bare runner over the SAME argv the tool built.
+                with patch.object(self.server, "execute_command", fake_exec):
+                    plain = self.server.run_command(seen["argv"][0])
+                self.assertEqual(plain, text)
+                self.assertEqual(scanner, captured["doc"]["scanner"])
+                self.assertEqual(1, len(captured["doc"]["findings"]))
+                self.assertIn(target, captured["doc"]["findings"][0]["Title"])
+
+    # Capture must add NOTHING to argv in out_args=None mode, or the text
+    # invariant is a claim rather than a property.
+    def test_wired_tools_add_no_argument(self):
+        expected = {
+            "whois_lookup": ["whois", "example.com"],
+            "nbtscan_scan": ["nbtscan", "192.168.1.0/24"],
+            "smb_enum": ["smbclient", "-L", "10.0.0.5", "-N"],
+            "metasploit_search": ["msfconsole", "-q", "-x", "search eternalblue; exit"],
+            "metasploit_info": ["msfconsole", "-q", "-x", "info exploit/windows/smb/ms17_010; exit"],
+            "fierce_scan": ["fierce", "--domain", "example.com"],
+        }
+        for tool, _scanner, args, _target in self.WIRED:
+            with self.subTest(tool=tool):
+                seen = {}
+
+                def fake_exec(cmd, timeout=None, **kwargs):
+                    seen["argv"] = list(cmd)
+                    return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="x\n", stderr="")
+
+                with (
+                    patch.object(self.server, "execute_command", fake_exec),
+                    patch.object(self.server, "_write_scanner_result", lambda d: "Z" * 32),
+                ):
+                    asyncio.run(getattr(self.server, tool)(*args))
+                self.assertEqual(expected[tool], seen["argv"])
+
+    # run_command has four no-substance returns, not two: the error and timeout
+    # strings, and the two status lines a run with NO output produces. All four
+    # would otherwise become an INFO card whose whole evidence is its own status.
+    def test_runs_with_nothing_to_show_are_not_findings(self):
+        parse = self.server._raw_text_parser("nbtscan", "10.0.0.1")
+        for text in ("✅ Command completed successfully (no output)",
+                     "⚠️ Command returned exit code 1",
+                     "❌ Error: Command not found. Tool may not be installed: nbtscan",
+                     "⏱️ Command timed out after 60 seconds."):
+            with self.subTest(text=text[:28]):
+                self.assertEqual([], parse(text))
+        # A banner WITH a body below it is a real result and is kept.
+        for text in ("✅ Scan completed successfully:\n\nDoing NBT name scan\n",
+                     "⚠️ Scan completed with warnings:\n\nNo reply from 10.0.0.1\n"):
+            with self.subTest(text=text[:28]):
+                self.assertEqual(1, len(parse(text)))
+
+    # Four credential leaks the red team found by feeding WHOLE multi-line tool
+    # text through the wave-4 redaction helper -- this is the first wave to do
+    # that, so each was reachable but never reached. Every one is an end-to-end
+    # check on the operator-visible evidence, not on the regex.
+    def test_multiline_tool_text_does_not_leak_credentials(self):
+        parse = self.server._raw_text_parser("whois", "example.com")
+        cases = {
+            # The keyword pattern's value is `[^\r\n]*`, so it ate a PEM opener
+            # sharing its line and disarmed the private-key pattern behind it.
+            "keyword pattern swallowing a PEM opener on its line":
+                ("password: -----BEGIN PRIVATE KEY-----\n"
+                 "MIIEvSUPERSECRETKEYMATERIAL\n-----END PRIVATE KEY-----", "SUPERSECRETKEYMATERIAL"),
+            # The orphan guard's anchors were case-sensitive while the full
+            # pattern was not, so a lowercase opener with no END matched neither.
+            "lowercase PEM opener with no END":
+                ("-----begin private key-----\nMIIEvLOWERCASELEAK\n", "LOWERCASELEAK"),
+        }
+        for label, (text, secret) in cases.items():
+            with self.subTest(case=label):
+                self.assertNotIn(secret, json.dumps(parse(text)))
+
+    # PAIRED redaction table. Every redaction test in this file used to assert
+    # only that a secret was ABSENT, never that legitimate content SURVIVED.
+    # That asymmetry is why two regressions that amputated the tail of every
+    # field carrying a well-formed credential passed a fully green suite. Both
+    # halves are asserted here.
+    REDACTION_MUST_REMOVE = (
+        ("orphaned URL credential", "https://svc:PWLEAK", "PWLEAK"),
+        ("orphaned JWT", "eyJhbGciOiJIUzI1NiJ9.PAYLOADLEAK", "PAYLOADLEAK"),
+        ("orphaned key", "-----BEGIN RSA PRIVATE KEY-----\nKEYLEAK", "KEYLEAK"),
+        ("orphaned lowercase key", "-----begin private key-----KEYLEAK", "KEYLEAK"),
+        ("complete URL credential", "https://svc:PWLEAK@host/x", "PWLEAK"),
+        ("complete key",
+         "-----BEGIN RSA PRIVATE KEY-----\nKEYLEAK\n-----END RSA PRIVATE KEY-----", "KEYLEAK"),
+        ("complete key then an orphaned one",
+         "-----BEGIN RSA PRIVATE KEY-----\nA\n-----END RSA PRIVATE KEY-----\n"
+         "-----BEGIN RSA PRIVATE KEY-----\nKEYLEAK", "KEYLEAK"),
+        # Both orders of a complete/orphaned pair. What removes the orphan here
+        # is `_redact_scanner_data`'s non-greedy private-key pattern, not the
+        # orphan guard.
+        ("orphaned key then a complete one",
+         "-----BEGIN RSA PRIVATE KEY-----\nKEYLEAK\nfiller\n"
+         "-----BEGIN RSA PRIVATE KEY-----\nB\n-----END RSA PRIVATE KEY-----", "KEYLEAK"),
+    )
+    REDACTION_MUST_KEEP = (
+        ("a plain whois record",
+         "Domain Name: EXAMPLE.COM\nRegistrar URL: https://www.markmonitor.com:443\n"
+         "Registrar Abuse Contact Email: abuse@markmonitor.com\n"
+         "Name Server: NS1.EXAMPLE.COM\n", "NS1.EXAMPLE.COM"),
+        ("headers below a well-formed JWT",
+         "HTTP/1.1 200 OK\nX-Auth: eyJhbGciOiJIUzI1NiJ9.eyJ1IjoiYSJ9.SIGSIG\n"
+         "Server: nginx/1.18.0\n", "nginx/1.18.0"),
+        # The two column-aligned shapes this family actually emits.
+        ("an nbtscan name table",
+         "10.0.0.5  ACME-DC1   <00> UNIQUE\n10.0.0.6  ACME-FS1   <20> UNIQUE\n", "ACME-FS1"),
+        ("an msfconsole module list",
+         "  exploit/windows/smb/ms17_010_eternalblue  2017-03-14  average\n", "ms17_010_eternalblue"),
+        ("a URL with an empty port", "See https://example.com:/path and more", "and more"),
+    )
+
+    def test_redaction_removes_secrets_and_keeps_everything_else(self):
+        parse = self.server._raw_text_parser("whois", "example.com")
+        for label, text, secret in self.REDACTION_MUST_REMOVE:
+            with self.subTest(removes=label):
+                self.assertNotIn(secret, json.dumps(parse(text)))
+        for label, text, keep in self.REDACTION_MUST_KEEP:
+            with self.subTest(keeps=label):
+                self.assertIn(keep, parse(text)[0]["evidence"])
+
+    # Redaction GROWS as well as shrinks: `token=x` (7) -> `token=[REDACTED]`
+    # (16). A body under the cap before redaction can exceed it after, so
+    # measuring the ORIGINAL text let a scan padded with short redactable lines
+    # push its real output out of the report with no truncation marker.
+    def test_redaction_growth_past_the_cap_is_still_marked(self):
+        parse = self.server._raw_text_parser("whois", "example.com")
+        text = "token=x\n" * 994 + "ZZZ_REAL_WHOIS_TAIL"
+        self.assertLess(len(text), self.server.MAX_EVIDENCE_CHARS)  # under the cap...
+        body = self.server._safe_scanner_value(text)
+        self.assertGreater(len(body), self.server.MAX_EVIDENCE_CHARS)  # ...but over it after
+        evidence = parse(text)[0]["evidence"]
+        self.assertTrue(evidence.endswith("… [truncated]"), evidence[-40:])
+        self.assertLessEqual(len(evidence), self.server.MAX_EVIDENCE_CHARS)
+
+    # For this family the text IS the deliverable, so a cut must be visible
+    # rather than reading as the tool having stopped there.
+    def test_oversized_evidence_is_marked_not_silently_cut(self):
+        parse = self.server._raw_text_parser("whois", "example.com")
+        cap = self.server.MAX_EVIDENCE_CHARS
+        evidence = parse("Registrar: " + "n" * (cap * 2))[0]["evidence"]
+        self.assertTrue(evidence.endswith("… [truncated]"), evidence[-40:])
+        self.assertLessEqual(len(evidence), cap)
+        # A body that fits is untouched -- no spurious marker.
+        short = parse("Registrar: Example Inc")[0]["evidence"]
+        self.assertNotIn("truncated", short)
+        self.assertIn("Registrar: Example Inc", short)
+
+    # The shared runner rejects a target beginning with '-' because it would be
+    # read as an option. That is right where the target IS a bare argv token,
+    # and wrong for msfconsole, whose query is interpolated inside a single
+    # `-x` string where a leading dash is msfconsole's own search syntax.
+    def test_leading_dash_guard_applies_only_where_the_target_reaches_argv(self):
+        seen = {}
+
+        def fake_exec(cmd, timeout=None, **kwargs):
+            seen["argv"] = list(cmd)
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="x\n", stderr="")
+
+        with (
+            patch.object(self.server, "execute_command", fake_exec),
+            patch.object(self.server, "_write_scanner_result", lambda d: "Z" * 32),
+        ):
+            # Positional-target tools keep the guard.
+            for tool, argument in (("whois_lookup", "-h"), ("nbtscan_scan", "-v"),
+                                   ("smb_enum", "-L"), ("fierce_scan", "--help")):
+                with self.subTest(tool=tool):
+                    seen.clear()
+                    text = asyncio.run(getattr(self.server, tool)(argument))
+                    self.assertIn("must not begin with", text)
+                    self.assertEqual({}, seen)  # never executed
+            # msfconsole's own search flags still work.
+            seen.clear()
+            text = asyncio.run(self.server.metasploit_search("-t exploit ms17_010"))
+            self.assertNotIn("must not begin with", text)
+            self.assertEqual(["msfconsole", "-q", "-x", "search -t exploit ms17_010; exit"], seen["argv"])
+            seen.clear()
+            asyncio.run(self.server.metasploit_info("-h"))
+            self.assertEqual(["msfconsole", "-q", "-x", "info -h; exit"], seen["argv"])
+
+    # A capture failure must never fail a completed scan.
+    def test_capture_failure_leaves_the_scan_text_intact(self):
+        def fake_exec(cmd, timeout=None, **kwargs):
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="whois body\n", stderr="")
+
+        def boom(document):
+            raise OSError("no space left on device")
+
+        with (
+            patch.object(self.server, "execute_command", fake_exec),
+            patch.object(self.server, "_write_scanner_result", boom),
+        ):
+            text = asyncio.run(self.server.whois_lookup("example.com"))
+        self.assertIn("whois body", text)
+        self.assertNotIn("Error", text)
+
+    # responder_analyze spawns no subprocess: there is no scan output to
+    # capture, and wiring it would fabricate a finding out of a constant.
+    def test_responder_is_not_wired_to_capture(self):
+        calls = []
+
+        with (
+            patch.object(self.server, "execute_command", lambda *a, **k: calls.append(a)),
+            patch.object(self.server, "_write_scanner_result", lambda d: calls.append(d)),
+        ):
+            text = asyncio.run(self.server.responder_analyze("eth0"))
+        self.assertEqual([], calls)
+        self.assertIn("Responder", text)
+
+    def test_single_id_report_accepts_raw_scanners(self):
+        for _tool, scanner, _args, _target in self.WIRED:
+            with self.subTest(scanner=scanner):
+                document = {"schema_version": 1, "scanner": scanner, "source_type": "host",
+                            "target_ref": "x.com", "status": "success",
+                            "findings": [{"id": "y", "Severity": "INFO", "Title": "y", "evidence": "raw"}],
+                            "metadata": {}}
+                with tempfile.TemporaryDirectory() as root_text:
+                    root = Path(root_text)
+                    results = root / "results"
+                    reports = root / "reports"
+                    results.mkdir()
+                    (results / f"{'A' * 32}.json").write_text(json.dumps(document), encoding="utf-8")
+                    with (
+                        patch.object(self.server, "RESULTS_ROOT", results),
+                        patch.object(self.server, "REPORTS_ROOT", reports),
+                        patch.object(self.server.secrets, "token_urlsafe", return_value="R" * 32),
+                    ):
+                        response = asyncio.run(self.server.generate_report("A" * 32))
+                    self.assertNotIn("Error", response)
+
+    # Distinct targets must stay distinct findings: the combined report dedupes
+    # on id, so a scanner-only id would merge two whois runs into one.
+    def test_distinct_targets_stay_distinct(self):
+        ids = {self.server._raw_text_parser("whois", host)("body")[0]["id"]
+               for host in ("a.example.com", "b.example.com")}
+        self.assertEqual(2, len(ids))
+
+    # The raw finding renders through the existing finding article -- no
+    # _render_report raw-card branch is needed.
+    def test_raw_finding_renders_its_text(self):
+        document = {"schema_version": 1, "scanner": "whois", "source_type": "host",
+                    "target_ref": "example.com", "status": "success",
+                    "findings": self.server._raw_text_parser("whois", "example.com")("Registrar: Example Inc"),
+                    "metadata": {}}
+        rendered = self.server._render_report(document)
+        self.assertIn("Registrar: Example Inc", rendered)
+
 
 
 if __name__ == "__main__":
