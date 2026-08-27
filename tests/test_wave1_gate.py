@@ -85,6 +85,71 @@ class FuzzTargetPlacementTests(unittest.TestCase):
                 self.assertEqual(expected, self.server._fuzz_target(target))
 
 
+class FuzzTargetRobustnessTests(unittest.TestCase):
+    """B2-1: the F1 repair made urlsplit reachable, and it raises."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    def test_a_bracket_malformed_target_returns_a_string_and_does_not_raise(self):
+        # urlsplit raises ValueError('Invalid IPv6 URL') on these. Every tool in
+        # this file returns a str, and dirb/gobuster hand such a target to the
+        # scanner to reject rather than blowing up.
+        for target in ("http://[::1/", "x[y]z", "192.168.1.1[", "[", "http://]["):
+            with self.subTest(target=target):
+                self.assertIsInstance(self.server._fuzz_target(target), str)
+
+    def test_both_fuzzers_survive_a_malformed_target(self):
+        import asyncio
+        for tool in ("ffuf_scan", "wfuzz_scan"):
+            for target in ("http://[::1/", "x[y]z"):
+                with self.subTest(tool=tool, target=target):
+                    with patch.object(self.server, "run_command", lambda *a, **k: "text"):
+                        self.assertIsInstance(asyncio.run(getattr(self.server, tool)(target)), str)
+
+
+class CurlProtocolPinningTests(unittest.TestCase):
+    """N2-1/N2-2: the scheme gate only governs the FIRST request."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    def argv_for(self, target):
+        seen = []
+
+        def fake_run(cmd, timeout=None, **kwargs):
+            seen.append(list(cmd))
+            return "text"
+
+        with patch.object(self.server, "run_command", fake_run):
+            asyncio.run(self.server.web_headers(target))
+        return seen[0]
+
+    def test_redirects_cannot_leave_http(self):
+        # With -L an attacker-controlled 302 sends curl wherever libcurl can go;
+        # an ftp:// redirect was observed attempting the connect, and the
+        # launcher runs --network=host.
+        argv = self.argv_for("example.com")
+        self.assertIn("--proto", argv)
+        self.assertIn("--proto-redir", argv)
+        self.assertEqual("=http,https", argv[argv.index("--proto") + 1])
+        self.assertEqual("=http,https", argv[argv.index("--proto-redir") + 1])
+
+    def test_a_legal_uppercase_scheme_is_honoured_not_mangled(self):
+        # RFC 3986 schemes are case-insensitive; HTTP://example.com is a legal
+        # URL and used to become https://HTTP://example.com.
+        for target in ("HTTP://example.com", "HtTpS://example.com", "HTTPS://example.com"):
+            with self.subTest(target=target):
+                self.assertEqual(target, self.argv_for(target)[-1])
+
+    def test_a_smuggled_scheme_is_still_defanged(self):
+        for target in ("file:///etc/shadow", "FILE:///etc/shadow", "gopher://127.0.0.1/x"):
+            with self.subTest(target=target):
+                self.assertTrue(self.argv_for(target)[-1].startswith("https://"))
+
+
 class NucleiCounterAndBannerTests(unittest.TestCase):
     """N-1 and N-2: a false refusal, and a stripper that ate real errors."""
 
@@ -119,6 +184,14 @@ class NucleiCounterAndBannerTests(unittest.TestCase):
 
     def test_the_bare_banner_domain_line_is_still_dropped(self):
         self.assertEqual("", self.server._strip_nuclei_banner("                projectdiscovery.io"))
+
+    def test_an_empty_detail_names_the_exit_code(self):
+        # Banner-only output strips to nothing, leaving "Nuclei scan failed: "
+        # with nothing after the colon.
+        completed = SimpleNamespace(returncode=7, stdout="", stderr="")
+        with patch.object(self.server, "execute_command", return_value=completed):
+            outcome = self.server._run_nuclei_capture(["nuclei"])
+        self.assertIn("exit code 7", outcome["error"])
 
     def test_a_real_message_on_stdout_survives_a_banner_only_stderr(self):
         banner = "   ____  __  _______/ /__  (_)\n                projectdiscovery.io\n"
