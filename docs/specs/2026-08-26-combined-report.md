@@ -581,10 +581,30 @@ Shipped, both verified with zero regressions across three adversarial rounds:
    as a keyword value before the key pattern could match it. The private-key
    pattern now runs FIRST.
 
-A differential over all twelve finding-producing parsers, using every input
-shape both reviewers raised, measures this pair at: 11 leaks closed, 0 opened,
-65 legitimate values preserved, 0 destroyed. The 9 remaining leaks are
-pre-existing on main and unchanged by this wave.
+A differential over all twelve finding-producing parsers measures this pair at:
+**11 leaks closed, 0 opened**. The remaining leaks are pre-existing on main and
+unchanged by this wave (they are #27).
+
+Fix 1 has a COST, found by an independent reviewer whose corpus carried a shape
+mine did not, and an earlier draft of this paragraph wrongly claimed "0
+destroyed". A COMPLETE lowercase key pair followed by legitimate output now
+loses that output:
+
+    -----begin private key-----\nAAA\n-----end private key-----\nName Server: NS1
+
+`_redact_scanner_data` consumes the pair and leaves its opener behind as the
+`\1` of `\1[REDACTED]`; `PEM_OPENER`'s new `(?i)` then matches that surviving
+lowercase opener, finds no closer after it, and truncates to end-of-value.
+
+It is taken deliberately, for three reasons. The UPPERCASE twin of that input
+already truncates identically on main, so this extends an existing behaviour
+rather than inventing one, and RFC 7468 specifies uppercase, so the lowercase
+form is non-standard. The alternative is leaving a real credential leak open: a
+lowercase `-----begin private key-----` with no END is matched by NEITHER the
+guard's anchors nor the full pattern, and its body reaches the operator, the
+store and the report. Losing trailing text on a malformed key beats leaking a
+well-formed one. The underlying over-redaction (for both cases) is #27's to
+fix.
 
 Known NOT covered, and deliberately left:
 - The pattern set assumes a `key: value` or `key=value` shape, while `nbtscan`,
@@ -594,6 +614,11 @@ Known NOT covered, and deliberately left:
   risks eating legitimate table rows, so it is a decision to take deliberately,
   not a fix to slip into this wave. RAISED to the user.
 - Everything under "Redaction hardening, deliberately NOT in this wave" below.
+- `_clip` can exceed its cap by the length of the redaction placeholder, because
+  `_redact_truncated_secret` appends `[REDACTED]` to an already-sliced string.
+  Worst observed is 8202 against a 8192 cap. `_clip` is byte-identical to main,
+  so this is pre-existing; recorded because this addendum claims the caps hold.
+  Filed with #27.
 - An orphan-guard redaction truncates to end-of-value BY DESIGN — once a
   secret's closing anchor is gone there is no way to know where the secret
   ends, so everything after the opener goes. It is marked with `[REDACTED]`,

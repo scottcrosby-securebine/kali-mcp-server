@@ -1247,7 +1247,7 @@ class RawTextCaptureTests(unittest.TestCase):
             with self.subTest(text=text[:28]):
                 self.assertEqual(1, len(parse(text)))
 
-    # Four credential leaks the red team found by feeding WHOLE multi-line tool
+    # Credential leaks found by feeding WHOLE multi-line tool
     # text through the wave-4 redaction helper -- this is the first wave to do
     # that, so each was reachable but never reached. Every one is an end-to-end
     # check on the operator-visible evidence, not on the regex.
