@@ -246,7 +246,10 @@ class LegacyToolContractTests(unittest.TestCase):
             "nmap_script_scan": ("192.0.2.1", "safe"),
             "sqlmap_scan": ("https://example.test/?id=1",),
             "crackmapexec_scan": ("192.0.2.1",),
-            "hydra_attack": ("192.0.2.1", "ssh", "tester"),
+            # password_list is now required (#52B): an empty list used to
+            # silently launch a rockyou brute force. exists() is patched True
+            # below, so any path is accepted.
+            "hydra_attack": ("192.0.2.1", "ssh", "tester", "/workspace/wordlist.txt"),
             "john_crack": ("/workspace/hashes.txt",),
             "hashcat_crack": ("/workspace/hashes.txt",),
             "metasploit_search": ("CVE-2021-44228",),
