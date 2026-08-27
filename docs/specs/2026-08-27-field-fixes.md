@@ -98,13 +98,28 @@ nuclei's full ASCII banner embedded.
 1. A selection yielding zero templates returns a clear, self-explanatory
    message naming the severity and the promoted-set size, not nuclei's FTL.
 2. nuclei's ASCII banner is stripped from error output.
-3. The nuclei config dir is pre-created so the
-   `Could not read nuclei-ignore file` error stops.
+3. The nuclei config dir is pre-created.
+
+**Claim downgraded after review.** The original wording said this "stops the
+`Could not read nuclei-ignore file` error". That is NOT verified and may be
+false: the mkdir creates the DIRECTORY, while the reported error names the
+`.nuclei-ignore` FILE, and `HOME=/tmp/scanner-home` is already writable tmpfs
+so nuclei could likely create the directory itself. No nuclei binary exists on
+the dev host, so this cannot be settled natively. What ships is the mkdir,
+which is harmless and best-effort. Whether the warning actually stops needs a
+container run and is tracked separately.
 
 Expanding the promoted template set is **out of scope** — that is #25.
 
 **Acceptance:** tests cover a zero-template selection and assert the message
 names the severity and the set size and contains no banner art.
+
+**Two further changes to the same error path, added during review.** The
+stripper runs BEFORE stderr-or-stdout is chosen (a banner-only stderr is
+truthy, so it used to win over a real message on stdout and then strip away to
+nothing), and an empty detail names the exit code instead of returning
+`Nuclei scan failed:` with nothing after the colon. Both pinned in
+`tests/test_wave1_gate.py`.
 
 ### A4 — #36 `web_headers` scheme and port
 `kali_pentest_server.py:1923`. A bare host is forced to `http://`, so an
@@ -118,6 +133,14 @@ to HTTPS rather than HTTP; `host:443` is treated as HTTPS; an explicit
 **Acceptance:** a table test covers bare host, `http://`, `https://`, IP,
 `host:443`, and `host:8080`, asserting the URL curl receives for each.
 
+**Added during review, not in the original issue.** The scheme gate governs
+only curl's FIRST request, so `--proto =http,https --proto-redir =http,https`
+pins both the initial and the redirect protocol sets: an `ftp://` redirect from
+an attacker-controlled server was observed attempting the connect under
+`--network=host`. `-g` disables URL globbing, without which
+`127.0.0.1:[1-65535]` is a range and one audit fans out into a port sweep
+(verified: three connects from one call).
+
 ### A5 — #35 trivy/syft `source_type` discoverability
 `kali_pentest_server.py:190-191, 2514, 2539`. `source_type="image"` is
 rejected and neither the docstring nor the error names the valid set.
@@ -125,6 +148,11 @@ rejected and neither the docstring nor the error names the valid set.
 **Required:** the error message lists the accepted values, for trivy and for
 syft. Docstrings name them too. Docstrings stay **one line** — the MCP client
 shows that line verbatim.
+
+**Widened during review, disclosed rather than silent.** `syft`'s `format`
+rejection has the identical gap (`SYFT_FORMATS` is undiscoverable, and `table`
+is as natural a wrong guess as `image`), so it got the same treatment. That is
+one field beyond what this section asked for.
 
 **Acceptance:** tests assert the rejection message contains every accepted
 value for both tools.
@@ -144,6 +172,15 @@ exactly, including fuzzing a non-path position.
 
 **Acceptance:** tests cover bare host, base URL with and without a trailing
 slash, and an explicit-FUZZ target in a query-parameter position.
+
+**One exemption, added during review.** A bracket-malformed target
+(`x[y]z`, `http://[127.0.0.1]/app?q=1`) makes `urlsplit` raise, and is handed to
+the scanner to refuse with NO FUZZ position rather than fuzzed. It still gets
+the scheme default first, so `x[y]z` returns as `http://x[y]z`; only an
+already-schemed target comes back byte-identical. Appending to it would
+place FUZZ after any query, which is the defect this section exists to fix, and
+ffuf's Go parser accepts a bracketed host so it would have run and fuzzed the
+query value. Pinned by `tests/test_wave1_gate.py::FuzzTargetRobustnessTests`.
 
 ## Wave 2 — renderer (PR B)
 
