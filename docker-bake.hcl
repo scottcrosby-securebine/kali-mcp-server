@@ -10,6 +10,14 @@ variable "BUILD_DATE" {
   default = "unknown"
 }
 
+# Default is the local OCI tar (dev path). Override to push, e.g.
+#   OUTPUT='type=registry' docker buildx bake --set kali-mcp.tags=ghcr.io/OWNER/kali-mcp-server:vX
+# CI publishes through build-push-action (see .github/workflows/container.yml),
+# not through this file; this override exists so a local push is possible too.
+variable "OUTPUT" {
+  default = "type=oci,dest=dist/kali-mcp.oci.tar"
+}
+
 group "default" {
   targets = ["kali-mcp"]
 }
@@ -18,7 +26,7 @@ target "kali-mcp" {
   context = "."
   dockerfile = "Dockerfile"
   platforms = ["linux/amd64", "linux/arm64"]
-  output = ["type=oci,dest=dist/kali-mcp.oci.tar"]
+  output = [OUTPUT]
   args = {
     KALI_BASE_IMAGE = KALI_BASE_IMAGE
     VCS_REF = VCS_REF

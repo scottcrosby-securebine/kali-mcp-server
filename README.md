@@ -11,7 +11,7 @@ Use this software only on systems and data you own or are explicitly authorized 
 - [MCP client integration](SETUP_DOCKER_MCP.md)
 - [Reproducible container build](docs/releases/container-build.md)
 
-Physical Apple Silicon Docker Desktop qualification passed for the recorded local arm64 image; see the [container build record](docs/releases/container-build.md). The structured evidence predates the latest launcher home-mount change, so the current launcher still needs refreshed Darwin evidence before final release. Linux/arm64 also has a separate QEMU-backed CI gate. The final multi-architecture image, registry digest, SBOM, and provenance are not published yet.
+Release qualification covers **Linux amd64 and arm64**: both are built, verified, and integration-tested in CI on every change, and the published multi-architecture image is qualified against those platforms. **macOS on Apple Silicon (`mac-hardened`) is a best-effort tier**, not a release gate: it runs the same image under Docker Desktop and is qualified manually with `scripts/qualify-apple-silicon` on physical Darwin/arm64. No hosted Darwin/arm64 runner exists, and the QEMU arm64 CI gate is a Linux runner, not a Darwin substitute, so macOS qualification cannot run in CI. A recorded local qualification is in the [container build record](docs/releases/container-build.md). The multi-architecture registry digest and SBOM attestation are produced by the release-tag CI job (Issue #12); until a release tag is pushed, no image is published.
 
 ## Runtime model
 
@@ -21,7 +21,7 @@ The launcher selects a host-compatible profile and constructs Docker arguments w
 |---|---|---|---|
 | `linux-full` | Linux amd64/arm64 | host | Default on Linux; still has no raw/link-layer capability |
 | `linux-hardened` | Linux amd64/arm64 | bridge | More network isolation; no raw/link-layer capability |
-| `mac-hardened` | Apple Silicon | bridge | Only supported macOS profile; recorded Docker Desktop qualification needs a current-launcher evidence refresh before release |
+| `mac-hardened` | Apple Silicon | bridge | Only supported macOS profile; best-effort tier qualified manually on physical Apple Silicon, not a CI-gated platform |
 
 Nmap wrappers force unprivileged TCP connect scanning (`--unprivileged -sT -Pn`). Raw-socket tools such as masscan, arp-scan, and netdiscover are absent. Broadcast NSE requests fail closed with `capability_missing`.
 
