@@ -174,7 +174,7 @@ different lanes can run concurrently; rows in the same lane cannot.
 | 8 | W1 | A | #55 render caps + module constant + owns `test_wave2_gate.py:134` | 1 | done | see log; `test_wave2_gate.py:134` NOT edited, see note | |
 | 9 | W1 | B | #46 + #44 merged, one scheme predicate, 9 sites | 1, 4 | done | see log; 10 sites, not 9 | |
 | 10 | W1 | C | #56 hashcat wordlist, owns `:2760-2761` | 1, 4 | done | see log; `--force` at 2863 untouched for row 11 | |
-| 11 | W1 | C | #45-server, add `--self-test-disable` at `:2763` | 10 | - | | |
+| 11 | W1 | C | #45-server, add `--self-test-disable` at `:2763` | 10 | done | see log | |
 | 12 | W1 | E | #15 amass, image layer | 1 | - | | needs container evidence |
 | 13 | W1 | E | #45-image, pocl/ocl-icd in `packages.lock` | 1 | - | | |
 | 14 | W1 | E | #25a template set + manifest + `test_nuclei_adapter.py:96` | 1 | - | | |
@@ -199,6 +199,7 @@ One line per session. Append, never edit.
 | 2026-08-28 | Merged PR #16, closed #2 as completed, appended verified corrections to 7 issue bodies. | 2, 3, 4 |
 | 2026-08-28 | User deferred row 1 (no push). Rows 5-14 proceed locally on the branch. | 1 -> blocked |
 | 2026-08-28 | #47: `stdin=DEVNULL` guard at the one spawn seam, pinned by 4 tests in `tests/test_issue_47.py`. Mutation-proved: removing the guard fails 2 of them, one after a real 10s block. | 5 -> done |
+| 2026-08-28 | #45 server half: `--self-test-disable` added to the hashcat command (an addition, not a `--force` swap). #45 stays OPEN for row 13's image half. | 11 -> done |
 | 2026-08-28 | #56: hashcat wordlist now required, no default and no missing->dirb swap, on the hydra_attack #52B template. Legacy contract updated to pass an explicit list. `--force` left for row 11. | 10 -> done |
 | 2026-08-28 | #44+#46: `has_web_scheme`/`with_web_scheme`/`is_https_target`, 10 call sites (the red team's own count of 9 missed `web_audit`). Drift test reads the source and exempts only the two helper bodies, matched whole-line. | 9 -> done |
 | 2026-08-28 | #55: `MAX_REPORT_FINDINGS=500` / `MAX_REPORT_RESULTS=50`, both disclosed, severity counted over all findings. The plan predicted this would break `test_wave2_gate.py:134` (151 articles) on the assumption of a 100 cap from `list_items`; 500 is the defensible ceiling and that test needed no edit. | 8 -> done |
