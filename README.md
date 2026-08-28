@@ -11,7 +11,7 @@ Use this software only on systems and data you own or are explicitly authorized 
 - [MCP client integration](SETUP_DOCKER_MCP.md)
 - [Reproducible container build](docs/releases/container-build.md)
 
-Physical Apple Silicon Docker Desktop qualification is still pending. Linux/arm64 passes the QEMU-backed CI gate, but that is not evidence of a completed macOS qualification.
+Physical Apple Silicon Docker Desktop qualification passed for the recorded local arm64 image; see the [container build record](docs/releases/container-build.md). The structured evidence predates the latest launcher home-mount change, so the current launcher still needs refreshed Darwin evidence before final release. Linux/arm64 also has a separate QEMU-backed CI gate. The final multi-architecture image, registry digest, SBOM, and provenance are not published yet.
 
 ## Runtime model
 
@@ -21,7 +21,7 @@ The launcher selects a host-compatible profile and constructs Docker arguments w
 |---|---|---|---|
 | `linux-full` | Linux amd64/arm64 | host | Default on Linux; still has no raw/link-layer capability |
 | `linux-hardened` | Linux amd64/arm64 | bridge | More network isolation; no raw/link-layer capability |
-| `mac-hardened` | Apple Silicon | bridge | Only supported macOS profile; physical qualification pending |
+| `mac-hardened` | Apple Silicon | bridge | Only supported macOS profile; recorded Docker Desktop qualification needs a current-launcher evidence refresh before release |
 
 Nmap wrappers force unprivileged TCP connect scanning (`--unprivileged -sT -Pn`). Raw-socket tools such as masscan, arp-scan, and netdiscover are absent. Broadcast NSE requests fail closed with `capability_missing`.
 
@@ -50,6 +50,8 @@ Commands are passed to subprocesses as argument lists; do not introduce `shell=T
 The following existing calls are direct-only: `nmap_script_scan`, `sqlmap_scan`, `crackmapexec_scan`, `hydra_attack`, `john_crack`, `hashcat_crack`, `metasploit_search`, and `metasploit_info`. Combined workflows never auto-chain them. A client or test harness must request them explicitly.
 
 Authenticated scanning, private-registry authentication, report history/comparison, and new exploit execution are future work.
+
+Preserved calls have known image-level defects pending release fixes: `amass_enum` is blocked by the Kali Amass wrapper's attempted privileged libpostal bootstrap ([#15](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/15)), and the default wordlist paths used by `ffuf_scan`, `gobuster_scan`, and `wfuzz_scan` do not match the locked image ([#14](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/14)). Hydra and Hashcat also share the missing path as a fallback when their preferred wordlist is unavailable; #14 tracks the full adapter audit. These MCP contracts remain present, but affected paths are not qualified as successful default operations.
 
 ## Development
 

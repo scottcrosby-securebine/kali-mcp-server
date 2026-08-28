@@ -16,7 +16,7 @@ That direct `docker run` invocation verifies the built image only. It is not an 
 
 The base image, Kali packages, source packages, Python packages, and promoted Nuclei templates are pinned. A later rebuild against Kali rolling is not guaranteed to reproduce a release image; when an image is published, its manifest digest is the release identity. The current workflow does not publish an image.
 
-CI verifies both Linux architectures; the arm64 leg runs through QEMU. Physical Apple Silicon Docker Desktop qualification is pending, so macOS instructions are provisional rather than a completed qualification claim.
+CI verifies both Linux architectures; the arm64 leg runs through QEMU. Physical Apple Silicon Docker Desktop qualification separately passed for the local arm64 image recorded in [`release-evidence/apple-silicon-darwin-arm64.json`](release-evidence/apple-silicon-darwin-arm64.json). That structured evidence predates the later private writable-home launcher change and must be refreshed against the current launcher before final release. It also does not publish or qualify a registry manifest: the multi-architecture release image, immutable registry digest, SBOM, and provenance remain Issue [#12](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/12) work.
 
 ## Launcher profiles
 
@@ -28,7 +28,9 @@ Run `scripts/kali-mcp --help` for the complete CLI.
 | `linux-hardened` | Linux amd64/arm64 | bridge | all dropped |
 | `mac-hardened` | Darwin arm64 | bridge | all dropped |
 
-All profiles also set `no-new-privileges`, use a read-only root filesystem, run as UID 1000, use hardened tmpfs mounts for `/tmp` and `/home/pentest`, and never mount the Docker socket. No current operation has proved a need for an added capability.
+All profiles also set `no-new-privileges`, use a read-only root filesystem, run as UID 1000, and never mount the Docker socket. `/tmp` is a hardened scratch tmpfs. `/home/pentest` is a private writable tmpfs owned by UID/GID 1000 with mode `0700`, allowing tools to initialize per-user configuration without weakening the read-only image. No current operation has proved a need for an added capability.
+
+The launcher recognizes Apple Silicon even when its Python process is translated by Rosetta. Physical Intel Macs remain unsupported.
 
 Nmap uses unprivileged TCP connect scans and skips raw host discovery. SYN scans, ICMP/ARP discovery, broadcast NSE behavior, masscan, arp-scan, and netdiscover are unavailable. `hashcat_crack` is CPU-only and uses `--force`.
 
@@ -146,6 +148,13 @@ docker run --rm --security-opt=no-new-privileges \
 ```
 
 Host-side Python is a contributor convenience, not an equivalent deployment: it requires the MCP dependency and every invoked Kali binary on `PATH`, and it lacks the container runtime controls.
+
+## Known image defects
+
+- `amass_enum` currently reaches a Kali wrapper that attempts a privileged libpostal bootstrap. That conflicts with the supported non-root, no-new-privileges runtime and fails before Amass starts. Track the reproducible fix in [#15](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/15).
+- Multiple adapters reference a default or fallback wordlist path absent from the locked image. `ffuf_scan`, `gobuster_scan`, and `wfuzz_scan` are confirmed default failures; Hydra and Hashcat reach the same missing path when their preferred wordlist is unavailable. Track the complete adapter audit and image regression fix in [#14](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/14).
+
+These calls remain in the 42-call compatibility contract, but affected execution paths are not qualified as successful real scans. Do not describe registration or string-return coverage as successful real scans.
 
 ## Future work and explicit exclusions
 
