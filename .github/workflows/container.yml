@@ -201,8 +201,8 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::Release tag '$REF_NAME' is not vMAJOR.MINOR.PATCH (optional -prerelease/+build). Refusing to publish."
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag '$REF_NAME' is not vMAJOR.MINOR.PATCH (optional -prerelease; no +build, container tags forbid "+"). Refusing to publish."
             exit 1
           fi
       - uses: actions/checkout@v4
@@ -284,6 +284,7 @@ jobs:
         with:
           name: release-evidence-published
           path: release-evidence/
+          if-no-files-found: error
 
   # ---- Durable evidence commit (#64, #65) ---------------------------------
   # Commits the published-image evidence captured above under
@@ -299,7 +300,14 @@ jobs:
       contents: write        # push the evidence branch
       pull-requests: write    # open the PR
     steps:
+      # Check out MAIN, not the tag's commit. The evidence PR must be an
+      # evidence-only diff: if the release tag sat on an off-main commit,
+      # branching from the tag would open a PR carrying every divergent commit
+      # under an "evidence" label, and a maintainer merging it would pull them in.
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
       - name: Download published evidence
         uses: actions/download-artifact@v4
         with:
@@ -316,7 +324,7 @@ jobs:
           # argument, never interpolated into a script body, and is constrained
           # to the SAME grammar the publish job validated before pushing, so the
           # two jobs never disagree about which tags are releasable.
-          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::record-evidence expects a vMAJOR.MINOR.PATCH tag, got '$REF_NAME'"; exit 1
           fi
           dest="release-evidence/$REF_NAME"
