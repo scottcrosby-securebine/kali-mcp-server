@@ -49,7 +49,7 @@ ordinary operator startup command.
 The `build-and-smoke` CI job loads images locally and does not publish.
 Publishing is a separate release-tag job (`publish` in `container.yml`) that
 pushes the multi-architecture image to GHCR (private) with an immutable digest,
-an SBOM attestation, and no signed provenance (GitHub artifact attestation for a private repo needs Enterprise Cloud; see the qualification spec). The recorded Apple image
+no build-time attestations. Signed provenance needs Enterprise Cloud for a private repo, and a BuildKit SBOM for this image exceeds BuildKit's 40 MiB attestation limit; AC5 rests on the immutable digest, and on-demand SBOMs come from the image's syft_sbom tool. The recorded Apple image
 digest is evidence for a local qualification artifact, not a pullable registry
 manifest; a pullable manifest exists only after a release tag is pushed
 (Issue #12).

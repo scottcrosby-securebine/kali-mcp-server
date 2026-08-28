@@ -213,11 +213,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       # The multi-arch manifest-list digest is the immutable release identity
-      # (#12 AC5). sbom:true attaches a BuildKit SBOM attestation to the image.
-      # Signed OIDC provenance is deliberately NOT emitted: GitHub artifact
-      # attestation for a PRIVATE repo requires Enterprise Cloud (Scott,
-      # 2026-08-28), so AC5 is met here by the immutable digest + SBOM, and
-      # buildkit provenance is left off (unsigned, adds nothing without signing).
+      # (#12 AC5). No build-time attestations are attached: a BuildKit SBOM for
+      # this full Kali image exceeds BuildKit's 40 MiB attestation limit and
+      # fails the push (Scott, 2026-08-29), and signed OIDC provenance needs
+      # Enterprise Cloud for a private repo (Scott, 2026-08-28). AC5 is met by
+      # the immutable digest. On-demand SBOMs remain available via the image's
+      # own syft_sbom MCP tool.
       - name: Build and push multi-arch image
         id: build
         uses: docker/build-push-action@v6
@@ -227,7 +228,7 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
           provenance: false
-          sbom: true
+          sbom: false
           build-args: |
             VCS_REF=${{ github.sha }}
             BUILD_DATE=${{ github.event.repository.updated_at }}
