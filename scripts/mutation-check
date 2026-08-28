@@ -10,6 +10,10 @@ source prints the first one and would otherwise be accepted as proof. Exit
 status alone is no better - an unimportable module, a missing dependency and a
 runner that collected nothing all exit non-zero while asserting nothing.
 
+The counts arrive on a private pipe, never on stdout or stderr. Collected tests
+print to both - the launcher test emits a docker command line - so a verdict
+sharing either channel is the same text-parsing hazard in another coat.
+
 Clears __pycache__ around every swap. A restore that rewrites the same byte
 count inside one second reproduces the source mtime, so Python keeps running the
 MUTATED bytecode while the source reads clean.
@@ -28,14 +32,15 @@ CAUGHT, SUITE_PASSED, INCONCLUSIVE = 0, 1, 2
 TARGET = "kali_pentest_server.py"
 
 # Run in a child process so a mutated import cannot contaminate this one, and
-# report counts as JSON on stdout while unittest's text goes to the terminal.
+# report counts as JSON down a private pipe (fd number in argv[2]) while
+# unittest's text and any output a test makes go to the terminal.
 RUNNER = r'''
-import json, sys, unittest
+import json, os, sys, unittest
 suite = unittest.defaultTestLoader.discover("tests", pattern=sys.argv[1])
 result = unittest.TextTestRunner(verbosity=1, stream=sys.stderr).run(suite)
-sys.stdout.write(json.dumps({"testsRun": result.testsRun,
-                             "failures": len(result.failures),
-                             "errors": len(result.errors)}))
+os.write(int(sys.argv[2]), json.dumps({"testsRun": result.testsRun,
+                                       "failures": len(result.failures),
+                                       "errors": len(result.errors)}).encode())
 '''
 
 
@@ -69,6 +74,34 @@ def clear_cache(repo):
         shutil.rmtree(cache, ignore_errors=True)
 
 
+def run_suite(pattern, cwd=None, stdout=None, stderr=None):
+    """Run the suite in a child and read its counts off a private pipe.
+
+    Returns (child exit status, counts dict or None). The payload travels on an
+    inherited pipe, not stdout: a collected test is free to print anything at
+    all, valid JSON included, and it lands on the terminal where it cannot be
+    mistaken for the verdict. Nothing but this pipe reaches the read end, so
+    there is no file to leak either.
+
+    stdout/stderr default to None, which inherits this process's - the child's
+    output belongs on the terminal. The self-test points them elsewhere so its
+    deliberate noise stays out of the parent suite's log, where a stray
+    `FAILED (failures=1)` would read as a real failure.
+    """
+    read_fd, write_fd = os.pipe()
+    try:
+        run = subprocess.run([sys.executable, "-c", RUNNER, pattern, str(write_fd)],
+                             pass_fds=(write_fd,), cwd=cwd, stdout=stdout, stderr=stderr)
+    finally:
+        os.close(write_fd)  # the last writer, so the read below cannot block
+    with os.fdopen(read_fd) as payload:
+        raw = payload.read()
+    try:
+        return run.returncode, json.loads(raw)
+    except ValueError:
+        return run.returncode, None
+
+
 def main(argv):
     if len(argv) < 2:
         print(f"usage: {argv[0]} <base-rev> [test-pattern]", file=sys.stderr)
@@ -81,7 +114,7 @@ def main(argv):
     os.chdir(repo)
     target = repo / TARGET
 
-    if subprocess.run(["git", "diff", "--quiet", "--", TARGET]).returncode:
+    if subprocess.run(["git", "diff", "--quiet", "HEAD", "--", TARGET]).returncode:
         print(f"refusing to run: {TARGET} has uncommitted changes", file=sys.stderr)
         return INCONCLUSIVE
 
@@ -97,15 +130,13 @@ def main(argv):
     try:
         target.write_bytes(mutated.stdout)
         clear_cache(repo)
-        run = subprocess.run([sys.executable, "-c", RUNNER, pattern], stdout=subprocess.PIPE, text=True)
+        status, counts = run_suite(pattern)
     finally:
         target.write_bytes(original)
         clear_cache(repo)
 
-    try:
-        counts = json.loads(run.stdout)
-    except ValueError:
-        print(f"MUTATION CHECK INCONCLUSIVE: the runner exited {run.returncode} without a "
+    if counts is None:
+        print(f"MUTATION CHECK INCONCLUSIVE: the runner exited {status} without a "
               "structured result, so no verdict is possible.", file=sys.stderr)
         return INCONCLUSIVE
 

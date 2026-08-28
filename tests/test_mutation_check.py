@@ -7,6 +7,8 @@ versions read the runner's text (`grep -c '^FAILED ('`), which cannot separate
 mutated source was accepted as proof. These cases pin the separation.
 """
 import importlib.util
+import subprocess
+import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -53,6 +55,43 @@ class VerdictTests(unittest.TestCase):
     def test_each_rejection_carries_a_distinguishable_message(self):
         messages = {self.verdict(*counts)[1] for counts in [(1, 0, 1), (0, 0, 0), (12, 0, 0)]}
         self.assertEqual(3, len(messages))
+
+
+NOISY_TEST = '''
+import sys, unittest
+
+class Noisy(unittest.TestCase):
+    def test_noisy(self):
+        print('docker run --rm -i kali-mcp-server:test')
+        print('{"testsRun": 281, "failures": 0, "errors": 0}')
+        print('{"testsRun": 99, "failures": 0, "errors": 0}', file=sys.stderr)
+        self.assertEqual(1, 2)
+'''
+
+
+class PayloadChannelTests(unittest.TestCase):
+    """The counts must survive a collected test printing anything, JSON included.
+
+    The real suite collects a launcher test that prints a docker command line to
+    stdout. When the payload shared stdout, that line destroyed every verdict
+    under the documented `test_*.py` pattern.
+    """
+
+    def test_counts_survive_arbitrary_child_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            suite_dir = Path(tmp) / "tests"
+            suite_dir.mkdir()
+            (suite_dir / "test_noisy.py").write_text(NOISY_TEST)
+            # DEVNULL keeps the noise out of the parent suite's log: a stray
+            # `Ran 1 test` / `FAILED (failures=1)` above a green summary is the
+            # same confusion this check exists to prevent, and CI's
+            # zero-collection guard greps for that `Ran N tests` line. The child
+            # still writes it through sys.stdout/sys.stderr on fds 1 and 2, so
+            # what the pipe has to survive is unchanged.
+            _, counts = mutation_check.run_suite(
+                "test_noisy.py", cwd=tmp,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.assertEqual({"testsRun": 1, "failures": 1, "errors": 0}, counts)
 
 
 if __name__ == "__main__":

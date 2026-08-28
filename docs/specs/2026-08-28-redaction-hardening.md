@@ -155,8 +155,10 @@ space. Its keep expectation is removed from the paired table for the tight shape
 only, and this is the reason.
 
 D2's other benefit stands and is what the ruling preserved:
-`ws://gateway:live contact ops@example.com` keeps its tail, no `@` being
-reachable before the space.
+`ws://gateway:live contact ops@example.com` keeps its tail, the cut ending at the
+space. The reason first written here -- that no `@` was reachable before that
+space -- described the `@`-reachability test that WAS the G1 defect. Under the
+unconditional run-to-space the tail is kept whether or not an `@` is reachable.
 
 ## Confirmed list
 
@@ -190,10 +192,15 @@ shape its author already imagined. `tests/redaction_differential.py` therefore n
 carries `sweep`, which walks the product of keyword prefix, secret body and
 trailing text — 800 combinations — through the composed public path and fails on
 any token the base removed and head leaves behind. On the first attempt it fires
-on 56 of them; on the current revision, 0. The count grew from 512 to 672 when the
-terminator samples were derived from the pattern rather than hand-kept, and to 800
-when whitespace-bearing bodies were added: the 36-sample corpus is blind to the
-G1 leak, and only those bodies catch it.
+on 56 of them; on the current revision, 0. The count is the product of keyword
+prefixes, secret bodies and trailing text. It grew 512 -> 672 when five bodies
+were added (port-shaped and empty-username credentials), and 672 -> 800 when four
+whitespace-bearing bodies were added: the 36-sample corpus is blind to the G1
+leak, and only those bodies catch it. An earlier draft of this paragraph
+attributed the first growth to deriving the terminator samples from the pattern.
+That was wrong -- `_terminator_samples` feeds `_corpus_for` and never the sweep
+product -- and it is recorded here rather than quietly overwritten, because a
+correction that introduces a new false claim is the failure this section is about.
 
 Source correction that changes how every fix must be tested (observed by the
 reproduction wave, verified by the orchestrator): **`_safe_scanner_value` does
@@ -226,3 +233,26 @@ content SURVIVED. Both halves are asserted from now on.
 | S5r | Standards | gate gap | The terminator set had drifted a THIRD time — the differential's table held 13 of the 15 the pattern accepts, missing `}` and the real newline. Hand-syncing three copies is what kept failing, so the pattern is now the one spelling, the differential derives its samples from it, and a test asserts the paired table covers every terminator the pattern accepts. Add one to the pattern and the suite fails until a row pins it. | fixed |
 | S1m | Standards | hazard | The `CLAUDE.md` mutation recipe was a five-line chain that overwrote TRACKED source and left the tree dirty if interrupted. It is `scripts/mutation-check <rev>` now, which refuses to start on a dirty tree and restores on any exit. | fixed |
 | S4 | Standards | style | Comment density. The blocks narrating what was tried are trimmed to what the code does; the history lives here and in the commit messages. | fixed |
+| S4x | user ruling | style | Comment density, raised a fourth time. **Ruled CLOSED by the user**: prose findings do not count unless the prose is factually wrong. A recurrence is a sighting, never a finding. The live remainder of this axis is factual only, and R8-W2 and R9-N6 are filed under that head. | declined |
+| R8-G1 | Spec axis | **leak, regression vs base** | The D3 run-to-space widening fired only where a closing `@` was still reachable, so the truncated-closer case the orphan guard exists for kept the narrow whitespace run: `https://user:PASS\nWORDLEAK` leaked on the branch and was redacted on `b3ca7e1`. All three D3 rows carried a trailing `@host/x`, pinning only the branch that got implemented, and no sweep body carried whitespace inside a secret. The run-to-space is unconditional for a URL orphan, three rows with no trailing `@` pin it, and tab/LF/CR/CRLF bodies were added to the sweep. | fixed |
+| R8-RTB1 | red team | cap violation | `_clip` exceeded its cap by 1..10 bytes: the re-guard added for R3 appends a placeholder and the outer branch appends a second. THIRD defect in one function, each bred by the previous fix. The bound is now one unconditional return rather than arithmetic per branch, which also deleted R3's separate short-limit branch and closed a fourth latent path where a negative limit sliced from the end. | fixed |
+| R8-F2t | Standards | drift risk | `/?#` spelled twice — FOURTH recurrence of this drift class in this file. `PORT_TERMINATORS` is derived from `PORT_TERMINATORS_STRICT`, so there is one spelling by construction. | fixed |
+| R8-F3m | Standards | **gate could not fail** | `scripts/mutation-check` certified a mutation the assertions had not caught, twice, both times by parsing the runner's TEXT: `grep -c '^FAILED ('` cannot tell `FAILED (errors=1)` from `FAILED (failures=1)`, and an import error satisfies both of the guards added after the first failure. Rewritten to read `testsRun`/`failures`/`errors` off the result object, accepting only `testsRun > 0 and failures > 0 and errors == 0`. | fixed |
+| R8-RTB3 | red team | **gate could pass vacuously** | The CI differential step used `--base HEAD~1`, which skipped every branch commit but the last, and whose documented fallback could resolve base == head, making the comparison unable to fail. It takes the merge-base with `main` and fails loudly on an empty, unresolvable or HEAD-equal base. | fixed |
+| R8-CN1 | orchestrator | **gate could pass vacuously** | `unittest discover` exits 0 having collected nothing, so a renamed test path greens the whole acceptance job. The step now requires a `Ran N tests` summary line. **Outside #27's target area and deliberately in scope**: it is R8-RTB3's own defect class in R8-RTB3's own file, and fixing an instance while leaving the class in place is what this phase exists to stop. | fixed |
+| R8-CN2 | orchestrator | **gate could pass vacuously** | The differential compares a base BLOB against the WORKING TREE, so the vacuous condition is base bytes == worktree bytes, not base commit == HEAD. Only the script sees both sides, so no CI guard can cover it. It refuses that case. | fixed |
+| R8-S1 | Standards | **gate fails on the wrong thing** | R8-CN2 backfired: the refusal returns 1, the same code as a real regression, and any change not touching `kali_pentest_server.py` has identical bytes by definition, so docs-only and workflow-only builds go red. Exit 2 now means nothing to measure, 1 stays regression, 0 stays measured and clean. Exit 0 was rejected: a local run against a base already containing the change would then report success having measured nothing. | confirmed |
+| R8-S2 | Standards | **gate fails on the wrong thing** | `github.event.before` is all-zeros on a first push and a force-push, so the base resolves empty and the step hard-errors on an environment shape. | confirmed |
+| R8-P1 | Spec axis | **gate could not run** | `scripts/mutation-check b3ca7e1` exits 2: the terminator coverage test does `getattr(self.server, name)` over a name absent at `b3ca7e1`, and the new `errors == 0` rule correctly refuses to certify a run containing an error. R8-F2t and R8-F3m broke each other inside one commit, so every assertion on this branch had been mutation-proved only against the previous branch commit, never against the pre-branch base — the one mutation #27's acceptance criterion names. The gate refusing to certify is what exposed it. | confirmed |
+| R8-B2 | red team | **gate could not run** | The rewrite removed the text-parsing hazard and reintroduced it as a channel collision: the JSON verdict payload travels on stdout, and under the documented `[test-pattern]` argument a launcher test prints a docker line to stdout, so no verdict is possible. Same launcher test the old bash header cited as the reason not to read the runner's text. The payload moved to a channel test output cannot reach. | confirmed |
+| R8-W1 | Spec axis | wrong claim | A correction in this spec attributed the 512 -> 672 sweep growth to deriving the terminator samples from the pattern. It was five added bodies; `_terminator_samples` never feeds the sweep product. A correction that introduced a new false claim. | fixed |
+| R8-W2 | Spec axis | wrong claim | The terminator coverage test's docstring claimed the strict set "was pinned by nothing at all". False: the wide set already contained `/?#` and the loop iterated it. After the derivation the strict set is a subset by construction, so the added loop can never fail while the wide loop passes. The loop stays — it is what fails if the sets are ever un-derived — and the docstring now says that instead. | confirmed |
+| R9-N3 | red team | **gate fails on the wrong thing** | `workflow_dispatch` on `main` fails 100% of the time: no PR base, merge-base equals HEAD, no `before`. One of three declared triggers permanently red. | confirmed |
+| R9-N4 | red team | wrong claim | The step's comment describes a "push build" measuring a whole feature branch. `push` is filtered to `branches: [main]`, so that build never runs; `pull_request` sets the base and skips the branch entirely. A comment describing a build that cannot happen. | confirmed |
+| R9-N6 | red team | wrong claim | The `ws://gateway:live` justification still named the `@`-reachability test that WAS the G1 defect. | fixed |
+| R9-N7 | red team | drift | This Confirmed list stopped at `S4` and recorded none of rounds 8 or 9, while every earlier round had rows. These are those rows. | fixed |
+| R9-N1 | red team | unpinned invariant | Deleting `limit = max(limit, 0)` from `_clip` left the suite green: the negative half of the invariant this round wrote down was unmeasured. | confirmed |
+| R9-N2 | red team | dead branch | `max(0, limit - len("[REDACTED]"))` is redundant once the single return bounds the result. One fewer branch in a function that has broken three times. | confirmed |
+| R9-N5 | red team | gap | No `merge_group` trigger: under a merge queue neither the acceptance step nor the differential gate runs on the queued merge. Reported, out of this round's scope. | filed |
+| R9-N8 | red team | test gap | `tests/test_mutation_check.py` covers `verdict()` only; `main()` — restore-on-exit, cache clearing, the dirty-tree refusal, the payload channel — is unpinned. R8-B2 is what that gap let through. | confirmed |
+| R9-N9 | red team | guard gap | `git diff --quiet -- <path>` does not see STAGED changes, so `git add` bypasses the dirty-tree refusal. Pre-existing, carried from the bash version. | confirmed |

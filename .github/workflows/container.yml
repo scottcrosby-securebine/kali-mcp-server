@@ -51,23 +51,59 @@ jobs:
           # commit of a branch, and on a shallow clone or a first commit it can
           # resolve to HEAD itself -- the differential then compares a revision
           # with itself, finds no regression by construction, and passes.
+          #
+          # The base per trigger, which is all three this workflow declares:
+          #   pull_request     the PR's base sha, so the whole branch is measured.
+          #   push             filtered to `branches: [main]`, so the merge-base
+          #                    is always HEAD and the only usable base is the
+          #                    pre-push tip. An all-zeros `before` (first push,
+          #                    or a force-push) names no such tip.
+          #   workflow_dispatch  no event range at all: the merge-base with the
+          #                    default branch, which on main is HEAD itself.
+          # The two shapes that name no distinct base -- an all-zeros push and a
+          # dispatch from the default branch -- are the environment saying there
+          # is nothing to measure, not a regression. They report that and pass.
+          # An UNEXPECTED unresolvable base still fails: a gate that cannot fail
+          # is the defect this step exists to close.
           head="$(git rev-parse --verify HEAD^{commit})"
-          base="$PR_BASE_SHA"
-          if [ -z "$base" ]; then
-            # Push build: the merge-base with the default branch, so the gate
-            # measures the whole branch and not just its last commit.
-            base="$(git merge-base origin/main HEAD 2>/dev/null || git merge-base main HEAD 2>/dev/null || true)"
-            # A push to main is its own merge-base; there the pushed range
-            # starts at the pre-push tip.
-            [ -n "$base" ] && [ "$base" != "$head" ] || base="$PUSH_BEFORE_SHA"
-          fi
+          zero="0000000000000000000000000000000000000000"
+          case "${GITHUB_EVENT_NAME:-}" in
+            pull_request | pull_request_target)
+              base="$PR_BASE_SHA"
+              ;;
+            push)
+              base="$PUSH_BEFORE_SHA"
+              if [ -z "$base" ] || [ "$base" = "$zero" ]; then
+                echo "::notice::Redaction differential gate: NOT MEASURED. This push reports no previous tip (before='$base'), which is a first push or a force-push, so there is no base revision to measure this working tree against."
+                exit 0
+              fi
+              ;;
+            *)
+              base="$(git merge-base origin/main HEAD 2>/dev/null || git merge-base main HEAD 2>/dev/null || true)"
+              if [ -n "$base" ] && [ "$base" = "$head" ]; then
+                echo "::notice::Redaction differential gate: NOT MEASURED. ${GITHUB_EVENT_NAME:-this event} carries no changed range, and HEAD is already on the default branch, so the merge-base is HEAD itself and there is nothing to measure against."
+                exit 0
+              fi
+              ;;
+          esac
           resolved="$(git rev-parse --verify --quiet "${base}^{commit}" || true)"
           if [ -z "$resolved" ] || [ "$resolved" = "$head" ]; then
             echo "::error::Redaction differential gate: base '$base' is empty, is not a commit, or equals HEAD ($head). A base equal to HEAD makes the differential unable to fail, so this is an environment failure, not a pass. Check that the checkout has full history (fetch-depth: 0) and that origin/main was fetched." >&2
             exit 1
           fi
           echo "redaction differential: base=$resolved head=$head"
-          python3 tests/redaction_differential.py --base "$resolved"
+          # 0 measured and clean, 1 a redaction regression, 2 the base carries
+          # an identical kali_pentest_server.py so there was nothing to measure
+          # (every docs-only, tests-only or workflow-only change). 2 passes, but
+          # never silently: a green log that does not say the gate measured
+          # nothing is the same silent pass as a vacuous base.
+          status=0
+          python3 tests/redaction_differential.py --base "$resolved" || status=$?
+          if [ "$status" = "2" ]; then
+            echo "::notice::Redaction differential gate: NOT MEASURED. Base $resolved carries the same kali_pentest_server.py as the working tree, so this change alters no redaction behaviour and the differential had nothing to compare."
+            exit 0
+          fi
+          exit "$status"
 
   build-and-smoke:
     timeout-minutes: 60

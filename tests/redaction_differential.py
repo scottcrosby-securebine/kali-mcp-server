@@ -352,6 +352,11 @@ def report(rows, sample_count):
 
 
 def main():
+    # Exit codes: 0 clean and measured, 1 a redaction regression, 2 nothing to
+    # measure (the base already carries the working tree's kali_pentest_server.py,
+    # which is every change that does not touch that file). 2 must not be 0: a
+    # local run against such a base would otherwise report success having
+    # compared a file with itself.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", help="write the full classified result here")
     parser.add_argument("--base", default=DEFAULT_BASE,
@@ -372,8 +377,9 @@ def main():
         # kali_pentest_server.py is equally vacuous. Compare the bytes.
         if base_path.read_bytes() == head_path.read_bytes():
             print(f"REFUSING: base {args.base} has the same kali_pentest_server.py as the "
-                  f"working tree, so this differential can measure nothing.", file=sys.stderr)
-            return 1
+                  f"working tree, so this differential can measure nothing. "
+                  f"Exiting 2 (nothing to measure), not 1 (regression).", file=sys.stderr)
+            return 2
         base = _load(base_path, "kali_pentest_server_base")
     head = _load(head_path, "kali_pentest_server_head")
     print(f"base={args.base}  head={head_path}\n")
