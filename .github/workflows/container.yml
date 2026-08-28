@@ -68,7 +68,7 @@ jobs:
           head="$(git rev-parse --verify HEAD^{commit})"
           zero="0000000000000000000000000000000000000000"
           case "${GITHUB_EVENT_NAME:-}" in
-            pull_request | pull_request_target)
+            pull_request)
               base="$PR_BASE_SHA"
               ;;
             push)
@@ -92,14 +92,23 @@ jobs:
             exit 1
           fi
           echo "redaction differential: base=$resolved head=$head"
-          # 0 measured and clean, 1 a redaction regression, 2 the base carries
+          # 0 measured and clean, 1 a redaction regression, 3 the base carries
           # an identical kali_pentest_server.py so there was nothing to measure
-          # (every docs-only, tests-only or workflow-only change). 2 passes, but
-          # never silently: a green log that does not say the gate measured
-          # nothing is the same silent pass as a vacuous base.
+          # (every docs-only, tests-only or workflow-only change). Anything else
+          # -- 2 included -- is a failure.
+          #
+          # 3 and not 2 because 2 is not a status only this script can produce:
+          # CPython exits 2 when it cannot open the script file, and argparse
+          # exits 2 on any usage error. Treating 2 as "nothing to measure"
+          # greens this gate on a deleted or renamed differential, and prints a
+          # notice asserting a reason that is false. Nothing produces 3 but the
+          # script saying so itself.
+          #
+          # 3 passes, but never silently: a green log that does not say the gate
+          # measured nothing is the same silent pass as a vacuous base.
           status=0
           python3 tests/redaction_differential.py --base "$resolved" || status=$?
-          if [ "$status" = "2" ]; then
+          if [ "$status" = "3" ]; then
             echo "::notice::Redaction differential gate: NOT MEASURED. Base $resolved carries the same kali_pentest_server.py as the working tree, so this change alters no redaction behaviour and the differential had nothing to compare."
             exit 0
           fi

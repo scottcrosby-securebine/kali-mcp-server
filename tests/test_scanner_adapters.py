@@ -3,6 +3,7 @@ import inspect
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -1476,6 +1477,27 @@ class RawTextCaptureTests(unittest.TestCase):
                             value = "A" * max(0, limit - offset) + opener + tail
                             self.assertLessEqual(len(self.server._clip(value, limit)), max(limit, 0))
 
+    def test_clip_reguard_keeps_the_redaction_marker_whole(self):
+        """`_clip`'s re-guard branch, pinned. Deleting the whole
+        `if len(clipped) > limit:` block left the suite green, because the cap
+        invariant above is satisfied by the final `clipped[:limit]` on its own.
+        What the branch actually buys is that the cut it has to make lands
+        BEFORE the placeholder rather than through it: without it the output
+        ends in `[REDA`, or in the bare opener with the marker sliced off
+        entirely, and a redacted cut reads as the tool having stopped there.
+        The re-redaction of the second slice is the other half and cannot be
+        seen from outside, so this pins the half that shows."""
+        for opener in ("eyJabcdefgh.", "https://svc:"):
+            for limit in (30, 60, 120, self.server.MAX_EVIDENCE_CHARS):
+                with self.subTest(opener=opener, limit=limit):
+                    value = "A" * (limit - len(opener) - 1) + opener + "P" + "B" * 500
+                    # The branch only fires when the guard's placeholder overshoots.
+                    self.assertGreater(
+                        len(self.server._redact_truncated_secret(value[:limit])), limit)
+                    clipped = self.server._clip(value, limit)
+                    self.assertTrue(clipped.endswith("[REDACTED]"), clipped[-20:])
+                    self.assertEqual(limit, len(clipped))
+
     def test_paired_table_covers_every_terminator_the_pattern_accepts(self):
         """The terminator set was spelled three times and drifted three times:
         `}` and the tab ended up accepted by `URL_PORT_TAIL` and pinned by
@@ -1488,13 +1510,20 @@ class RawTextCaptureTests(unittest.TestCase):
         strict is a subset of wide and the strict loop below cannot fail on its
         own. The loop is here for the day someone un-derives them and spells
         strict separately again -- the fifth recurrence of this drift -- so that
-        it fails instead of silently reopening it. `getattr(..., "")` so a name
-        absent from an older revision contributes nothing rather than erroring,
-        which is what the mutation gate replays against."""
+        it fails instead of silently reopening it.
+
+        A missing name must FAIL, not error and not pass. `getattr(..., "")`
+        was the fifth recurrence's hiding place: renaming the set left the loop
+        iterating an empty string and the suite green. An older revision that
+        carries neither name is what the mutation gate replays against, and it
+        accepts an assertion failure but rejects an AttributeError, so absence
+        is asserted rather than raised."""
         pinned = "".join(text[len("see https://host:8443")] for _, text, _ in self.REDACTION_MUST_KEEP
                          if text.startswith("see https://host:8443"))
         for name in ("PORT_TERMINATORS", "PORT_TERMINATORS_STRICT"):
-            for terminator in getattr(self.server, name, ""):
+            terminators = getattr(self.server, name, None)
+            self.assertIsNotNone(terminators, f"{name} must keep this name: the paired table iterates it")
+            for terminator in terminators or "":
                 with self.subTest(terminator_set=name, terminator=terminator):
                     self.assertIn(terminator, pinned)
         self.assertTrue({" ", "\t"} <= set(pinned), "whitespace terminators must be pinned too")
@@ -1645,6 +1674,39 @@ class RawTextCaptureTests(unittest.TestCase):
         rendered = self.server._render_report(document)
         self.assertIn("Registrar: Example Inc", rendered)
 
+
+class RedactionDifferentialExitCodeTests(unittest.TestCase):
+    """`tests/redaction_differential.py` is a gate whose exit status IS its
+    verdict, and the CI step maps each code to a different outcome. Nothing
+    asserted what it returns, which is how "nothing to measure" shipped as 2 --
+    a code CPython also returns when it cannot open the script file and argparse
+    returns on any usage error, so the step passed with a false notice on a
+    renamed gate path and on a renamed flag."""
+
+    SCRIPT = Path(__file__).resolve().parent / "redaction_differential.py"
+
+    def _status(self, *args):
+        return subprocess.run([sys.executable, str(self.SCRIPT), *args],
+                              cwd=self.SCRIPT.parent.parent,
+                              capture_output=True, text=True).returncode
+
+    def test_a_base_carrying_the_working_tree_file_exits_3(self):
+        # A base byte-identical to the working tree, built without committing:
+        # a blob of the current file and a dangling tree holding it. `git show
+        # <tree>:<path>` reads that, which is all the script does with --base.
+        repo = self.SCRIPT.parent.parent
+        def git(*args, stdin=None):
+            return subprocess.run(["git", *args], cwd=repo, input=stdin, check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        blob = git("hash-object", "-w", "kali_pentest_server.py")
+        tree = git("mktree", stdin=f"100644 blob {blob}\tkali_pentest_server.py\n")
+        self.assertEqual(3, self._status("--base", tree))
+
+    def test_usage_and_environment_errors_are_not_confusable_with_that(self):
+        # Both are argparse's 2. The point is only that neither is 3, or the CI
+        # step would report "nothing to measure" for a gate that never ran.
+        self.assertEqual(2, self._status("--bogus-arg"))
+        self.assertEqual(2, self._status("--base", "nosuchrev"))
 
 
 if __name__ == "__main__":

@@ -7,7 +7,9 @@ versions read the runner's text (`grep -c '^FAILED ('`), which cannot separate
 mutated source was accepted as proof. These cases pin the separation.
 """
 import importlib.util
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
@@ -18,7 +20,15 @@ _spec = importlib.util.spec_from_loader("mutation_check", SourceFileLoader("muta
 mutation_check = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(mutation_check)
 
-CAUGHT, SUITE_PASSED, INCONCLUSIVE = 0, 1, 2
+CAUGHT, SUITE_PASSED, INCONCLUSIVE, NOTHING_TO_MEASURE = 0, 1, 2, 3
+
+
+def next_pipe():
+    """The lowest free descriptor pair. It moves up if a call leaked one."""
+    fds = os.pipe()
+    for fd in fds:
+        os.close(fd)
+    return fds
 
 
 class VerdictTests(unittest.TestCase):
@@ -92,6 +102,90 @@ class PayloadChannelTests(unittest.TestCase):
                 "test_noisy.py", cwd=tmp,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.assertEqual({"testsRun": 1, "failures": 1, "errors": 0}, counts)
+
+
+# A runner that reports its counts and exits while a forked child still holds
+# the inherited write end: reading to EOF would wait for that child.
+REPORTING_FORKER = '''
+import os, time, unittest
+
+class Forker(unittest.TestCase):
+    def test_forks_a_child_that_outlives_the_runner(self):
+        if os.fork() == 0:
+            time.sleep(15)
+            os._exit(0)
+        self.assertEqual(1, 2)
+'''
+
+# The same, except the runner dies before writing anything. Nothing will ever
+# arrive, and the pipe stays open, so a blocking read waits forever.
+DYING_FORKER = '''
+import os, time, unittest
+
+class Forker(unittest.TestCase):
+    def test_dies_before_reporting(self):
+        if os.fork() == 0:
+            time.sleep(15)
+            os._exit(0)
+        os._exit(1)
+'''
+
+# run_suite driven from a separate process so a blocking read shows up here as a
+# TimeoutExpired FAILURE instead of hanging this suite.
+DRIVER = '''
+import importlib.util, json, subprocess, sys
+from importlib.machinery import SourceFileLoader
+spec = importlib.util.spec_from_loader("mc", SourceFileLoader("mc", sys.argv[1]))
+mc = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mc)
+_, counts = mc.run_suite(sys.argv[3], cwd=sys.argv[2],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+print(json.dumps(counts))
+'''
+
+
+class PipeLifetimeTests(unittest.TestCase):
+    """The payload pipe must not hang the gate, and must not leak either end.
+
+    A gate whose failure mode is a hang is worse than one that fails: CI reports
+    it as an infrastructure timeout, not a defect. Both cases here fail.
+    """
+
+    def test_a_forked_grandchild_cannot_hang_the_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "tests").mkdir()
+            (Path(tmp) / "tests" / "test_reporting_forker.py").write_text(REPORTING_FORKER)
+            (Path(tmp) / "tests" / "test_dying_forker.py").write_text(DYING_FORKER)
+            for pattern, expected in [
+                    ("test_reporting_forker.py", '{"testsRun": 1, "failures": 1, "errors": 0}'),
+                    ("test_dying_forker.py", "null")]:
+                with self.subTest(pattern=pattern):
+                    driver = subprocess.run(
+                        [sys.executable, "-c", DRIVER, str(SCRIPT), tmp, pattern],
+                        capture_output=True, text=True, timeout=10)
+                    self.assertEqual(expected, driver.stdout.strip(), driver.stderr)
+
+    def test_both_pipe_ends_are_closed_on_success_and_on_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "tests").mkdir()
+            (Path(tmp) / "tests" / "test_noisy.py").write_text(NOISY_TEST)
+            before = next_pipe()
+            mutation_check.run_suite("test_noisy.py", cwd=tmp,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.assertEqual(before, next_pipe(), "a descriptor leaked on the success path")
+            with self.assertRaises(OSError):        # no such cwd: run() raises
+                mutation_check.run_suite("test_noisy.py", cwd=str(Path(tmp) / "absent"))
+            self.assertEqual(before, next_pipe(), "a descriptor leaked on the error path")
+
+
+class NothingToMeasureTests(unittest.TestCase):
+    def test_an_unmutated_base_is_not_an_accusation(self):
+        run = subprocess.run([sys.executable, str(SCRIPT), "HEAD"],
+                             capture_output=True, text=True, cwd=SCRIPT.parent.parent)
+        if run.returncode == INCONCLUSIVE:
+            self.skipTest(f"precondition not met: {run.stderr.strip()}")
+        self.assertEqual(NOTHING_TO_MEASURE, run.returncode, run.stderr)
+        self.assertIn("NOTHING TO MEASURE", run.stderr)
 
 
 if __name__ == "__main__":

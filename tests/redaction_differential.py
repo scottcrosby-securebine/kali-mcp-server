@@ -352,11 +352,21 @@ def report(rows, sample_count):
 
 
 def main():
-    # Exit codes: 0 clean and measured, 1 a redaction regression, 2 nothing to
-    # measure (the base already carries the working tree's kali_pentest_server.py,
-    # which is every change that does not touch that file). 2 must not be 0: a
-    # local run against such a base would otherwise report success having
-    # compared a file with itself.
+    # Exit codes, and NOTHING here may collide with a code the runtime also
+    # produces: CPython exits 2 when it cannot open the script file and argparse
+    # exits 2 on any usage error, so a caller mapping 2 to "nothing to measure"
+    # passes on a renamed gate path or a renamed flag while asserting a reason
+    # that is false.
+    #   0  measured, clean
+    #   1  a redaction regression
+    #   2  usage or environment error (argparse's own code: a bad flag, or a
+    #      base revision git cannot read -- NOT a regression and NOT a verdict)
+    #   3  nothing to measure: the base already carries the working tree's
+    #      kali_pentest_server.py, which is every change that does not touch
+    #      that file. Neither the interpreter nor argparse produces 3, so a
+    #      caller can map it without ambiguity. It must not be 0: a run against
+    #      such a base would otherwise report success having compared a file
+    #      with itself.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", help="write the full classified result here")
     parser.add_argument("--base", default=DEFAULT_BASE,
@@ -367,9 +377,16 @@ def main():
     head_path = REPO / "kali_pentest_server.py"
     with tempfile.TemporaryDirectory() as tmp:
         base_path = Path(tmp) / "base_kali_pentest_server.py"
-        base_path.write_bytes(subprocess.run(
-            ["git", "show", f"{args.base}:kali_pentest_server.py"],
-            cwd=REPO, check=True, stdout=subprocess.PIPE).stdout)
+        try:
+            base_path.write_bytes(subprocess.run(
+                ["git", "show", f"{args.base}:kali_pentest_server.py"],
+                cwd=REPO, check=True, stdout=subprocess.PIPE).stdout)
+        except subprocess.CalledProcessError:
+            # An unreadable base is the caller naming a revision that is not
+            # there. That is a usage error (exit 2), not a redaction regression
+            # (exit 1, which is what the traceback used to be reported as) and
+            # not "nothing to measure" (exit 3, which asserts a measurement ran).
+            parser.error(f"cannot read kali_pentest_server.py at base {args.base!r}")
         # A differential whose two sides are the same source measures nothing and
         # reports it as clean, which is the very failure class this file gates.
         # The head side is the WORKING TREE, not a revision, so comparing commit
@@ -378,8 +395,8 @@ def main():
         if base_path.read_bytes() == head_path.read_bytes():
             print(f"REFUSING: base {args.base} has the same kali_pentest_server.py as the "
                   f"working tree, so this differential can measure nothing. "
-                  f"Exiting 2 (nothing to measure), not 1 (regression).", file=sys.stderr)
-            return 2
+                  f"Exiting 3 (nothing to measure), not 1 (regression).", file=sys.stderr)
+            return 3
         base = _load(base_path, "kali_pentest_server_base")
     head = _load(head_path, "kali_pentest_server_head")
     print(f"base={args.base}  head={head_path}\n")

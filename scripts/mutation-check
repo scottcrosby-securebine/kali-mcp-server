@@ -18,7 +18,9 @@ Clears __pycache__ around every swap. A restore that rewrites the same byte
 count inside one second reproduces the source mtime, so Python keeps running the
 MUTATED bytecode while the source reads clean.
 
-Exit: 0 the mutation was caught, 1 the suite passed against it, 2 inconclusive.
+Exit: 0 the mutation was caught, 1 the suite passed against it, 2 inconclusive,
+3 nothing to measure (the base and the working tree carry the same file, so no
+mutation was introduced and the assertions were never put to the question).
 """
 import json
 import os
@@ -28,7 +30,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-CAUGHT, SUITE_PASSED, INCONCLUSIVE = 0, 1, 2
+CAUGHT, SUITE_PASSED, INCONCLUSIVE, NOTHING_TO_MEASURE = 0, 1, 2, 3
 TARGET = "kali_pentest_server.py"
 
 # Run in a child process so a mutated import cannot contaminate this one, and
@@ -89,13 +91,25 @@ def run_suite(pattern, cwd=None, stdout=None, stderr=None):
     `FAILED (failures=1)` would read as a real failure.
     """
     read_fd, write_fd = os.pipe()
+    # Never read to EOF: any process the child forked inherits the write end and
+    # can hold the pipe open past the child's exit, and a blocking read would
+    # then hang the gate instead of failing it. The child writes its counts
+    # before it exits, so once run() has reaped it the payload is already in the
+    # buffer; a non-blocking read either finds it or leaves raw empty, which is
+    # the INCONCLUSIVE verdict below.
+    os.set_blocking(read_fd, False)
     try:
-        run = subprocess.run([sys.executable, "-c", RUNNER, pattern, str(write_fd)],
-                             pass_fds=(write_fd,), cwd=cwd, stdout=stdout, stderr=stderr)
+        try:
+            run = subprocess.run([sys.executable, "-c", RUNNER, pattern, str(write_fd)],
+                                 pass_fds=(write_fd,), cwd=cwd, stdout=stdout, stderr=stderr)
+        finally:
+            os.close(write_fd)
+        try:
+            raw = os.read(read_fd, 65536)
+        except BlockingIOError:
+            raw = b""
     finally:
-        os.close(write_fd)  # the last writer, so the read below cannot block
-    with os.fdopen(read_fd) as payload:
-        raw = payload.read()
+        os.close(read_fd)
     try:
         return run.returncode, json.loads(raw)
     except ValueError:
@@ -126,6 +140,14 @@ def main(argv):
 
     # Held in memory, so there is no temp file to leak when we are interrupted.
     original = target.read_bytes()
+
+    # No mutation, so the assertions were never put to the question. Saying they
+    # "pin nothing" here would accuse them of failing a test they never sat.
+    if mutated.stdout == original:
+        print(f"MUTATION CHECK: NOTHING TO MEASURE: {TARGET} at {base} is byte-identical "
+              "to the working tree, so no mutation was introduced.", file=sys.stderr)
+        return NOTHING_TO_MEASURE
+
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(INCONCLUSIVE))
     try:
         target.write_bytes(mutated.stdout)

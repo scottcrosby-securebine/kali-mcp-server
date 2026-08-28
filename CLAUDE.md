@@ -23,14 +23,26 @@ python3 -m unittest discover -s tests -v
 
 # Redaction gate. NOT collected by unittest discover -- run it directly, and read
 # the EXIT STATUS, not the last line of output (a launcher test prints a docker
-# line after `OK`). Fails on a leak opened, on legitimate content destroyed, on a
-# parser the corpus never exercised, and on any sweep combination the base
-# redacted and HEAD does not. Pass --base after this branch merges.
+# line after `OK`). Three states: 0 measured and clean; 3 NOTHING TO MEASURE,
+# the base carries a byte-identical kali_pentest_server.py so the run is a pass
+# that proves nothing; any other status a failure. 1 is the real verdict -- a
+# leak opened, legitimate content destroyed, a parser the corpus never
+# exercised, or a sweep combination the base redacted and HEAD does not. 2 is
+# not a verdict at all: CPython exits 2 on a script it cannot open and argparse
+# exits 2 on a bad flag, which is why "nothing to measure" is 3 and 2 fails.
+# Pass --base after this branch merges.
 python3 tests/redaction_differential.py [--base <rev>] [--json out.json]
 
-# Mutation check: the redaction assertions must FAIL against the revision they
-# were written for, or they pin nothing. Restores the tree on any exit.
-scripts/mutation-check <base-rev>
+# Mutation check: swap kali_pentest_server.py for the version at <base-rev>, run
+# the tests matching <test-pattern> (default `test_scanner_adapters.py`) against
+# it, and require a real ASSERTION failure -- 0 the mutation was caught, 1 the
+# suite ran clean so those assertions pin nothing, 2 INCONCLUSIVE (nothing
+# collected, or an error, neither of which proves anything either way), 3 the
+# base is byte-identical to the working tree so nothing was mutated. Same 3 as
+# the redaction gate above, and for the same reason: a run that measured nothing
+# must not report either a pass or an accusation. Refuses to start while
+# kali_pentest_server.py has uncommitted changes. Restores the tree on any exit.
+scripts/mutation-check <base-rev> [test-pattern]
 
 # Verify a built image under the required NNP boundary
 docker run --rm --security-opt=no-new-privileges \
