@@ -213,14 +213,21 @@ class LegacyToolContractTests(unittest.TestCase):
                 ],
             ),
             (
+                # #43: web_audit resolves the scheme once, port-implied, and
+                # hands it to every child. A bare host with no port is https,
+                # not the old blind http:// -- and the same across all stages,
+                # where it used to defeat web_headers' own resolution.
                 "web_audit",
                 "example.test",
                 [
-                    ("whatweb_scan", ("http://example.test", "3")),
-                    ("wafw00f_scan", ("http://example.test",)),
-                    ("web_headers", ("http://example.test",)),
-                    ("nikto_scan", ("http://example.test",)),
-                    ("nuclei_scan", ("http://example.test",)),
+                    ("whatweb_scan", ("https://example.test", "3")),
+                    ("wafw00f_scan", ("https://example.test",)),
+                    ("web_headers", ("https://example.test",)),
+                    ("nikto_scan", ("https://example.test",)),
+                    ("nuclei_scan", ("https://example.test",)),
+                    # Newly reached: a bare host is https now, so the TLS stage
+                    # runs where the old blind http:// skipped it.
+                    ("sslscan_scan", ("example.test",)),
                 ],
             ),
             (
