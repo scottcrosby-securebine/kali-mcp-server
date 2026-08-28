@@ -164,7 +164,7 @@ different lanes can run concurrently; rows in the same lane cannot.
 
 | # | Wave | Lane | Item | Needs | State | Landed as | Blocker |
 |---|---|---|---|---|---|---|---|
-| 1 | W0 | F | Merge #27 (`fix/redaction-hardening`, 5 commits) | — | - | | user says "push it" |
+| 1 | W0 | F | Merge #27 (`fix/redaction-hardening`, 8 commits) | — | blocked | | **user deferred 2026-08-28**: no push/PR/CI yet |
 | 2 | W0 | F | Merge PR #16 (docs truth) | — | done | `756e199` on main | |
 | 3 | W0 | F | Close or relabel #2 | — | done | closed as completed, `ready-for-agent` removed | |
 | 4 | W0 | F | Amend 7 issue bodies (see table above) | — | done | #47 #44 #24 #26 #14 #56 #45 | |
@@ -197,3 +197,4 @@ One line per session. Append, never edit.
 |---|---|---|
 | 2026-08-28 | Built this plan: 3 mapping agents, 1 adversarial pass. Closed #27's code work (7 commits, unmerged). | — |
 | 2026-08-28 | Merged PR #16, closed #2 as completed, appended verified corrections to 7 issue bodies. | 2, 3, 4 |
+| 2026-08-28 | User deferred row 1 (no push). Rows 5-14 proceed locally on the branch. | 1 -> blocked |
