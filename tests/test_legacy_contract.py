@@ -251,7 +251,10 @@ class LegacyToolContractTests(unittest.TestCase):
             # below, so any path is accepted.
             "hydra_attack": ("192.0.2.1", "ssh", "tester", "/workspace/wordlist.txt"),
             "john_crack": ("/workspace/hashes.txt",),
-            "hashcat_crack": ("/workspace/hashes.txt",),
+            # wordlist is now required (#56): an empty list used to default to
+            # rockyou and a missing path silently swapped to dirb. isfile is
+            # patched True below, so any path is accepted.
+            "hashcat_crack": ("/workspace/hashes.txt", "0", "/workspace/wordlist.txt"),
             "metasploit_search": ("CVE-2021-44228",),
             "metasploit_info": ("exploit/test/module",),
         }
