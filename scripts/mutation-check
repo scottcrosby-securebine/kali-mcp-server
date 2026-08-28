@@ -1,54 +1,118 @@
-#!/usr/bin/env bash
-# Prove the redaction assertions actually catch what they claim: restore the
-# server from <base-rev>, run the suite against it, and require a FAILURE.
-#
-# Reads the runner's EXIT STATUS. Never `tail -1 | grep '^OK$'` here: a launcher
-# test prints a docker line after `OK`, which silently voids that check.
-#
-# Clears __pycache__ around every swap. A restore that rewrites the same byte
-# count inside one second reproduces the source mtime, so Python keeps running
-# the MUTATED bytecode while the source reads clean.
-set -euo pipefail
+#!/usr/bin/env python3
+"""Prove the suite's assertions catch what they claim: swap kali_pentest_server.py
+for the version at <base-rev>, run the suite against it, and require a genuine
+ASSERTION FAILURE.
 
-base="${1:-}"
-[ -n "$base" ] || { echo "usage: scripts/mutation-check <base-rev> [test-pattern]" >&2; exit 2; }
-pattern="${2:-test_scanner_adapters.py}"
-repo="$(git rev-parse --show-toplevel)"
-cd "$repo"
+Reads unittest's STRUCTURED result (testsRun / failures / errors), never the
+runner's text. `FAILED (errors=1)` and `FAILED (failures=1)` are different facts
+and `grep '^FAILED ('` cannot tell them apart: an import error in the mutated
+source prints the first one and would otherwise be accepted as proof. Exit
+status alone is no better - an unimportable module, a missing dependency and a
+runner that collected nothing all exit non-zero while asserting nothing.
 
-git diff --quiet -- kali_pentest_server.py || {
-  echo "refusing to run: kali_pentest_server.py has uncommitted changes" >&2; exit 2; }
+Clears __pycache__ around every swap. A restore that rewrites the same byte
+count inside one second reproduces the source mtime, so Python keeps running the
+MUTATED bytecode while the source reads clean.
 
-saved="$(mktemp)"; cp kali_pentest_server.py "$saved"
-clear_cache() { find . -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true; }
-restore() { cp "$saved" kali_pentest_server.py; rm -f "$saved"; clear_cache; }
-# EXIT alone: with INT/TERM as well the handler runs twice, the second pass
-# copies a tempfile it already deleted, and a clean run reports failure.
-trap restore EXIT
+Exit: 0 the mutation was caught, 1 the suite passed against it, 2 inconclusive.
+"""
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+from pathlib import Path
 
-git show "$base:kali_pentest_server.py" > kali_pentest_server.py
-clear_cache
-out="$(mktemp)"
-set +e
-python3 -m unittest discover -s tests -p "$pattern" 2>&1 | tee "$out"
-status=${PIPESTATUS[0]}
-set -e
+CAUGHT, SUITE_PASSED, INCONCLUSIVE = 0, 1, 2
+TARGET = "kali_pentest_server.py"
 
-# A non-zero exit is NOT proof. An import error, a missing dependency or a
-# runner that collected nothing all exit non-zero while asserting nothing, and
-# accepting them is the same mistake as reading the last output line instead of
-# the status. Require that tests RAN and that real assertions failed.
-ran="$(sed -n 's/^Ran \([0-9]\{1,\}\) test.*/\1/p' "$out" | tail -1)"
-verdict="$(grep -c '^FAILED (' "$out" || true)"
-rm -f "$out"
+# Run in a child process so a mutated import cannot contaminate this one, and
+# report counts as JSON on stdout while unittest's text goes to the terminal.
+RUNNER = r'''
+import json, sys, unittest
+suite = unittest.defaultTestLoader.discover("tests", pattern=sys.argv[1])
+result = unittest.TextTestRunner(verbosity=1, stream=sys.stderr).run(suite)
+sys.stdout.write(json.dumps({"testsRun": result.testsRun,
+                             "failures": len(result.failures),
+                             "errors": len(result.errors)}))
+'''
 
-if [ "$status" -eq 0 ]; then
-  echo "MUTATION CHECK FAILED: the suite PASSED against $base, so the assertions pin nothing." >&2
-  exit 1
-fi
-if [ -z "$ran" ] || [ "$ran" -eq 0 ] || [ "$verdict" -eq 0 ]; then
-  echo "MUTATION CHECK INCONCLUSIVE: exited $status but collected ${ran:-0} tests with no FAILED" >&2
-  echo "verdict. That is an environment failure, not evidence the assertions pin anything." >&2
-  exit 2
-fi
-echo "mutation check OK: $ran tests ran against $base and the suite reported FAILED, as it must."
+
+def verdict(tests_run, failures, errors, base="the mutated source"):
+    """The whole decision, taken on counts. Returns (exit_code, message).
+
+    Proof requires all three: tests were collected, at least one ASSERTION
+    failed, and nothing errored. An error is broken infrastructure, and broken
+    infrastructure proves nothing about the assertions.
+    """
+    if tests_run <= 0:
+        return INCONCLUSIVE, (
+            f"MUTATION CHECK INCONCLUSIVE: collected {tests_run} tests against {base}. "
+            "Nothing was asserted, so nothing was proved.")
+    if errors:
+        return INCONCLUSIVE, (
+            f"MUTATION CHECK INCONCLUSIVE: {errors} ERROR(s) against {base} "
+            f"({failures} assertion failure(s), {tests_run} tests run). An error is "
+            "broken infrastructure, not evidence the assertions pin anything.")
+    if not failures:
+        return SUITE_PASSED, (
+            f"MUTATION CHECK FAILED: {tests_run} tests ran clean against {base}, "
+            "so the assertions pin nothing.")
+    return CAUGHT, (
+        f"mutation check OK: {tests_run} tests ran against {base}, {failures} failed "
+        "on assertions, 0 errors.")
+
+
+def clear_cache(repo):
+    for cache in repo.rglob("__pycache__"):
+        shutil.rmtree(cache, ignore_errors=True)
+
+
+def main(argv):
+    if len(argv) < 2:
+        print(f"usage: {argv[0]} <base-rev> [test-pattern]", file=sys.stderr)
+        return INCONCLUSIVE
+    base = argv[1]
+    pattern = argv[2] if len(argv) > 2 else "test_scanner_adapters.py"
+
+    repo = Path(subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                               capture_output=True, text=True, check=True).stdout.strip())
+    os.chdir(repo)
+    target = repo / TARGET
+
+    if subprocess.run(["git", "diff", "--quiet", "--", TARGET]).returncode:
+        print(f"refusing to run: {TARGET} has uncommitted changes", file=sys.stderr)
+        return INCONCLUSIVE
+
+    mutated = subprocess.run(["git", "show", f"{base}:{TARGET}"], capture_output=True)
+    if mutated.returncode:
+        print(f"refusing to run: cannot read {base}:{TARGET}", file=sys.stderr)
+        sys.stderr.buffer.write(mutated.stderr)
+        return INCONCLUSIVE
+
+    # Held in memory, so there is no temp file to leak when we are interrupted.
+    original = target.read_bytes()
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(INCONCLUSIVE))
+    try:
+        target.write_bytes(mutated.stdout)
+        clear_cache(repo)
+        run = subprocess.run([sys.executable, "-c", RUNNER, pattern], stdout=subprocess.PIPE, text=True)
+    finally:
+        target.write_bytes(original)
+        clear_cache(repo)
+
+    try:
+        counts = json.loads(run.stdout)
+    except ValueError:
+        print(f"MUTATION CHECK INCONCLUSIVE: the runner exited {run.returncode} without a "
+              "structured result, so no verdict is possible.", file=sys.stderr)
+        return INCONCLUSIVE
+
+    code, message = verdict(counts["testsRun"], counts["failures"], counts["errors"], base)
+    print(message, file=sys.stdout if code == CAUGHT else sys.stderr)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

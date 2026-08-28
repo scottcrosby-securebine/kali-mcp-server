@@ -204,6 +204,19 @@ SWEEP_BODIES = (
     # and both turned out to be live leaks.
     "https://svc:12345", "https://svc:00001", f"https://:{SWEEP_TOKEN}@db.internal/x",
     f"https://us[er:{SWEEP_TOKEN}@h/x", f"ws://gateway:{SWEEP_TOKEN}",
+    # Whitespace INSIDE the credential. No body carried any, so all 672
+    # combinations were blind to how far an orphan's run reaches -- which is
+    # precisely what D3 changed, and a half-applied D3 kept the tail of a
+    # newline-split password in the report (#27 G1). A URL parser strips tab, CR
+    # and LF before parsing, so each of these is ONE credential and the token
+    # after the whitespace is part of it. Paired with SWEEP_TAILS' " trailing
+    # ZQKEEPZQ", each also asserts the space AFTER the token still ends the run.
+    # A SPACE inside the credential is deliberately absent: D2 ruled the run ends
+    # there, so base's end-of-value cut and head's bounded one differ BY DESIGN
+    # and neither direction of this sweep can measure it. It is pinned instead by
+    # the paired table's "text after a credential-shaped phrase" keep row.
+    f"https://user:PASS\t{SWEEP_TOKEN}", f"https://user:PASS\n{SWEEP_TOKEN}",
+    f"https://user:PASS\r{SWEEP_TOKEN}", f"https://user:PASS\r\n{SWEEP_TOKEN}",
 )
 # Each non-empty tail carries SWEEP_KEEP so the destroyed direction has
 # something to measure: it is ordinary text sitting after the secret.
@@ -346,14 +359,24 @@ def main():
     args = parser.parse_args()
 
     load_server()  # reuse the repo's FastMCP stub install; its module is discarded
+    head_path = REPO / "kali_pentest_server.py"
     with tempfile.TemporaryDirectory() as tmp:
         base_path = Path(tmp) / "base_kali_pentest_server.py"
         base_path.write_bytes(subprocess.run(
             ["git", "show", f"{args.base}:kali_pentest_server.py"],
             cwd=REPO, check=True, stdout=subprocess.PIPE).stdout)
+        # A differential whose two sides are the same source measures nothing and
+        # reports it as clean, which is the very failure class this file gates.
+        # The head side is the WORKING TREE, not a revision, so comparing commit
+        # ids cannot see this: a different commit carrying an identical
+        # kali_pentest_server.py is equally vacuous. Compare the bytes.
+        if base_path.read_bytes() == head_path.read_bytes():
+            print(f"REFUSING: base {args.base} has the same kali_pentest_server.py as the "
+                  f"working tree, so this differential can measure nothing.", file=sys.stderr)
+            return 1
         base = _load(base_path, "kali_pentest_server_base")
-    head = _load(REPO / "kali_pentest_server.py", "kali_pentest_server_head")
-    print(f"base={args.base}  head={REPO / 'kali_pentest_server.py'}\n")
+    head = _load(head_path, "kali_pentest_server_head")
+    print(f"base={args.base}  head={head_path}\n")
 
     corpus = _corpus_for(head)
     rows = run(base, head, corpus)

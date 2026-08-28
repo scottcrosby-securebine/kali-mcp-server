@@ -33,6 +33,13 @@ Issue #27's own acceptance bar, verbatim from the issue body:
 >   (a launcher test prints a docker line last, which silently voids a
 >   `tail -1 | grep '^OK$'` check).
 
+The delivered `scripts/mutation-check` is stronger than that last criterion, and
+had to be: exit status alone cannot tell a genuine assertion failure from an
+import error, and two successive attempts to read the runner's text output both
+certified a mutation the assertions had not caught. It reads `testsRun`,
+`failures` and `errors` off the result object and accepts only
+`testsRun > 0 and failures > 0 and errors == 0`.
+
 ## Scope answers (doctrine step 1)
 
 - **Target area**: the shared scanner-redaction helpers in
@@ -129,17 +136,23 @@ team broke it. Two reviewers disagreed, each correct about a different standard:
   `user:PASSWORD`, and bounding the cut at the newline left `WORD` in the report.
 
 The user ruled for WHATWG, so the sanitiser now assumes the more permissive
-parser. A URL orphan's run ends at a SPACE rather than at any whitespace, and
-only where no `@` is still reachable before that space; an `@` ahead of it means
-the credential may be continuing across a character the parser will strip. A JWT
-keeps the whitespace bound, its compact serialization admitting none.
+parser. A URL orphan's run ends at a SPACE rather than at any whitespace,
+unconditionally. The first implementation applied the widened run only where an
+`@` was still reachable, which is backwards: the truncated-closer case is the one
+the guard exists for, so the condition switched the fix off exactly where it was
+needed and leaked the tail past a tab or a newline. A JWT keeps the whitespace
+bound, its compact serialization admitting none.
 
-**This costs the benefit D2 was chosen for.** The whois abuse address on the line
-below an orphaned credential cannot survive, because under a WHATWG parser it may
-itself be part of that credential. Its keep expectation is removed from the paired
-table for the second time, and this is the reason. Both halves of the earlier
-claim — that the keep was satisfiable "honestly, because the cut is bounded" —
-were true under D2 and are not true under D3.
+**This costs part of the benefit D2 was chosen for, and less of it than an
+earlier draft of this section claimed.** What D3 cannot keep is the ONE word
+following the stripped whitespace, because under a WHATWG parser that word may
+itself be part of the credential. Measured on the tight shape
+`https://reg:PWLEAK\nabuse@registrar.tld`, the abuse address is cut. On the
+likelier shape, `Registrar: https://reg:PWLEAK\nAbuse contact:
+abuse@registrar.tld`, only the word `Abuse` is lost and `abuse@registrar.tld`
+survives. The blanket "cannot survive" was wrong; the cut still ends at the next
+space. Its keep expectation is removed from the paired table for the tight shape
+only, and this is the reason.
 
 D2's other benefit stands and is what the ruling preserved:
 `ws://gateway:live contact ops@example.com` keeps its tail, no `@` being
@@ -175,9 +188,12 @@ that reported zero regressions, and both belong to one class: a change that make
 a pattern match LESS than base. A fixed corpus can only catch a regression in a
 shape its author already imagined. `tests/redaction_differential.py` therefore now
 carries `sweep`, which walks the product of keyword prefix, secret body and
-trailing text — 512 combinations — through the composed public path and fails on
+trailing text — 800 combinations — through the composed public path and fails on
 any token the base removed and head leaves behind. On the first attempt it fires
-on 56 of them; on the current revision, 0.
+on 56 of them; on the current revision, 0. The count grew from 512 to 672 when the
+terminator samples were derived from the pattern rather than hand-kept, and to 800
+when whitespace-bearing bodies were added: the 36-sample corpus is blind to the
+G1 leak, and only those bodies catch it.
 
 Source correction that changes how every fix must be tested (observed by the
 reproduction wave, verified by the orchestrator): **`_safe_scanner_value` does

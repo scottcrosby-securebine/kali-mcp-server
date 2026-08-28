@@ -1361,6 +1361,17 @@ class RawTextCaptureTests(unittest.TestCase):
         ("a credential spanning a newline", "https://user:PASS\nWORDLEAKA@host/x", "WORDLEAKA"),
         ("a credential spanning a tab", "https://user:PASS\tWORDLEAKB@host/x", "WORDLEAKB"),
         ("a credential spanning a carriage return", "https://user:PASS\rWORDLEAKC@host/x", "WORDLEAKC"),
+        # Every D3 row above carries a trailing `@host/x`, so all three pinned
+        # only the branch where the closer is still reachable -- and the guard
+        # exists for the case where it is NOT. With the `@` truncated away the
+        # narrow whitespace run still applied and the tail leaked, on head but
+        # not on base (#27 G1). The run-to-space is unconditional now.
+        ("a newline-split credential with no trailing @",
+         "https://user:PASS\nWORDLEAKD Name Server: NS1", "WORDLEAKD"),
+        ("a tab-split credential with no trailing @",
+         "https://user:PASS\tWORDLEAKE Name Server: NS1", "WORDLEAKE"),
+        ("a CR-split credential with no trailing @",
+         "https://user:PASS\rWORDLEAKF Name Server: NS1", "WORDLEAKF"),
     )
     REDACTION_MUST_KEEP = (
         ("a plain whois record",
@@ -1425,36 +1436,58 @@ class RawTextCaptureTests(unittest.TestCase):
          "eyJhbGciOiJIUzI1NiJ9.PAYLOADLEAK Name Server: NS1", "NS1"),
         ("text after a credential with an empty username",
          "prefix https://:PASSWORD1@db.internal/x suffix", "suffix"),
+        # The paired half of the three G1 rows above, on the SAME strings: the
+        # run-to-space must be unconditional AND must still stop at the space,
+        # or the fix for the leak is just the end-of-value cut D2 removed.
+        ("text after a newline-split credential",
+         "https://user:PASS\nWORDLEAKD Name Server: NS1", "Name Server: NS1"),
+        ("text after a tab-split credential",
+         "https://user:PASS\tWORDLEAKE Name Server: NS1", "Name Server: NS1"),
+        ("text after a CR-split credential",
+         "https://user:PASS\rWORDLEAKF Name Server: NS1", "Name Server: NS1"),
     )
 
     def test_clip_never_exceeds_its_cap(self):
-        """#27 H5. The guard APPENDS its placeholder to what it kept, so an
-        opener landing near the boundary returned more than `limit`. BOTH kept
-        openers do it -- an earlier version of this test said only the JWT one
-        could, and exercised only JWT pads, so the URL case sat unpinned while
-        the claim read as verified. A limit shorter than the placeholder is
-        covered too: it used to make the slice negative and GROW the result."""
+        """`_clip`'s one invariant: the result never exceeds `limit`. It has now
+        broken three separate ways -- #27 H5 (the guard APPENDS its placeholder,
+        so an opener landing near the boundary overshot; BOTH kept openers do it,
+        and an earlier version of this test exercised only JWT pads), #27 R3 (a
+        limit shorter than the placeholder made the slice negative and GREW the
+        result), and #27 RT-B1 (R3's re-guard appends a placeholder of its own
+        and the caller appended a second one). Each fix was scoped to the shape
+        that had just broken, so this sweeps the space instead of that shape:
+        both openers, limits 0-139 against 40 pad offsets, and a two-opener body
+        that forces the re-guard to fire -- which is what RT-B1 needed and the
+        single-opener rows above cannot produce."""
         cap = self.server.MAX_EVIDENCE_CHARS
         for opener in ("eyJabcdefgh.", "https://svc:"):
-            for offset in range(8, 30):
-                with self.subTest(opener=opener, offset=offset):
-                    value = "A" * (cap - offset) + opener + "B" * 500
-                    self.assertLessEqual(len(self.server._clip(value, cap)), cap)
-        for limit in range(0, 15):
-            with self.subTest(short_limit=limit):
-                self.assertLessEqual(len(self.server._clip("eyJabcde.", limit)), limit)
+            # One opener, and TWO split by a space so the guard cuts twice.
+            for name, tail in (("one-opener", "B" * 500),
+                               ("two-opener", "B" + " " + opener + "C" * 500)):
+                for offset in range(0, 40):
+                    with self.subTest(opener=opener, tail=name, cap_offset=offset):
+                        value = "A" * (cap - offset) + opener + tail
+                        self.assertLessEqual(len(self.server._clip(value, cap)), cap)
+                for limit in range(0, 140):
+                    for offset in range(0, 40):
+                        with self.subTest(opener=opener, tail=name, limit=limit, offset=offset):
+                            value = "A" * max(0, limit - offset) + opener + tail
+                            self.assertLessEqual(len(self.server._clip(value, limit)), limit)
 
     def test_paired_table_covers_every_terminator_the_pattern_accepts(self):
         """The terminator set was spelled three times and drifted three times:
         `}` and the tab ended up accepted by `URL_PORT_TAIL` and pinned by
         nothing. Hand-syncing copies is what failed, so this asserts the
         coverage instead -- add a terminator to the pattern and this fails until
-        a row pins it."""
+        a row pins it. BOTH sets are walked: this used to iterate the wide one
+        alone, so the strict set was pinned by nothing at all and `/?#` sat
+        spelled twice under a comment claiming one spelling (#27 F2)."""
         pinned = "".join(text[len("see https://host:8443")] for _, text, _ in self.REDACTION_MUST_KEEP
                          if text.startswith("see https://host:8443"))
-        for terminator in self.server.PORT_TERMINATORS:
-            with self.subTest(terminator=terminator):
-                self.assertIn(terminator, pinned)
+        for name in ("PORT_TERMINATORS", "PORT_TERMINATORS_STRICT"):
+            for terminator in getattr(self.server, name):
+                with self.subTest(terminator_set=name, terminator=terminator):
+                    self.assertIn(terminator, pinned)
         self.assertTrue({" ", "\t"} <= set(pinned), "whitespace terminators must be pinned too")
 
     def test_redaction_removes_secrets_and_keeps_everything_else(self):
