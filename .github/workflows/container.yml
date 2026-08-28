@@ -177,8 +177,8 @@ jobs:
   # Runs ONLY on a real v* release-tag PUSH, after the acceptance/redaction
   # gates (report-browser) AND both platform smoke builds pass. `if` is scoped
   # to event_name == 'push' so a workflow_dispatch pointed at an arbitrary tag
-  # ref cannot reach the elevated scopes. Holds the publish scopes; no other
-  # job can push a package or mint an attestation.
+  # ref cannot reach the elevated scope. Holds the only packages:write in the
+  # workflow; no other job can push a package.
   publish:
     needs: [report-browser, build-and-smoke]
     if: >-
@@ -186,15 +186,10 @@ jobs:
       startsWith(github.ref, 'refs/tags/v')
     # One publish per tag. Without this a rerun or a concurrent push of the same
     # tag races the evidence branch/PR; the loser fails rather than colliding.
-    concurrency:
-      group: release-${{ github.ref }}
-      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write      # push image to GHCR (#63)
-      id-token: write       # OIDC keyless attestation (#63)
-      attestations: write   # required by actions/attest-build-provenance (#63)
     steps:
       # Validate the tag BEFORE anything is pushed. The `if` only proves the ref
       # starts with `v`; `v` and `vfoo` would otherwise publish an image that
@@ -206,7 +201,7 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Release tag '$REF_NAME' is not vMAJOR.MINOR.PATCH (optional -prerelease/+build). Refusing to publish."
             exit 1
           fi
@@ -220,9 +215,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       # The multi-arch manifest-list digest is the immutable release identity
-      # (#12 AC5). sbom:true attaches a BuildKit SBOM attestation; provenance is
-      # supplied by the OIDC-signed attest step below (buildkit provenance is
-      # unsigned, so it is left off rather than double-attesting).
+      # (#12 AC5). sbom:true attaches a BuildKit SBOM attestation to the image.
+      # Signed OIDC provenance is deliberately NOT emitted: GitHub artifact
+      # attestation for a PRIVATE repo requires Enterprise Cloud (Scott,
+      # 2026-08-28), so AC5 is met here by the immutable digest + SBOM, and
+      # buildkit provenance is left off (unsigned, adds nothing without signing).
       - name: Build and push multi-arch image
         id: build
         uses: docker/build-push-action@v6
@@ -236,12 +233,6 @@ jobs:
           build-args: |
             VCS_REF=${{ github.sha }}
             BUILD_DATE=${{ github.event.repository.updated_at }}
-      - name: Attest build provenance (OIDC keyless)
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-name: ghcr.io/${{ github.repository }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
       # #62: the package must be PRIVATE. GHCR sets a package's visibility from
       # the OWNING REPO on first publication, so a first push from this private
       # repo lands private; visibility is a package/repo setting, not something a
@@ -303,9 +294,6 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v')
-    concurrency:
-      group: release-${{ github.ref }}
-      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write        # push the evidence branch
@@ -328,7 +316,7 @@ jobs:
           # argument, never interpolated into a script body, and is constrained
           # to the SAME grammar the publish job validated before pushing, so the
           # two jobs never disagree about which tags are releasable.
-          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::record-evidence expects a vMAJOR.MINOR.PATCH tag, got '$REF_NAME'"; exit 1
           fi
           dest="release-evidence/$REF_NAME"

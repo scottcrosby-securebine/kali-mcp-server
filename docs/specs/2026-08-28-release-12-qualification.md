@@ -10,12 +10,15 @@ resolves blockers #62, #63, #64, #65, #66. Issue-ref resolution:
 - **Registry (#62): "GHCR, private."** Push the image to
   `ghcr.io/scottcrosby-securebine/kali-mcp-server`, private visibility, with an
   immutable digest. Pulls need auth.
-- **Signing (#63): "OIDC + attestation."** Grant `packages: write` +
-  `id-token: write` (+ `attestations: write`); publish OIDC keyless provenance
-  via `actions/attest-build-provenance` and an SBOM attestation via
-  `build-push-action` `sbom: true`. The unsigned BuildKit provenance is left off
-  (`provenance: false`) so provenance is not double-attested. Satisfies #12 AC5
-  (provenance) in full.
+- **Signing (#63): "OIDC + attestation" — REVISED 2026-08-28 to "private, drop
+  signed attestation."** GitHub artifact attestation for a **private** repo
+  requires Enterprise Cloud, which conflicts with the private-registry decision
+  on a non-EE plan, so the signed OIDC provenance step is dropped. The release
+  grants only `packages: write` and publishes an SBOM attestation via
+  `build-push-action` `sbom: true`. #12 AC5 is met by the immutable digest + the
+  SBOM, not by signed provenance. If the account later moves to Enterprise
+  Cloud, re-add `actions/attest-build-provenance` (+ `id-token: write`,
+  `attestations: write`).
 - **Evidence retention (#64 package-lock, #65 CapEff): "Commit to
   release-evidence/."** Per-release package and CapEff evidence lands durably in
   the git tree under `release-evidence/`, not only as an expiring CI artifact.

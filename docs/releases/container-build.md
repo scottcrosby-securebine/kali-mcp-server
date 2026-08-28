@@ -49,19 +49,22 @@ ordinary operator startup command.
 The `build-and-smoke` CI job loads images locally and does not publish.
 Publishing is a separate release-tag job (`publish` in `container.yml`) that
 pushes the multi-architecture image to GHCR (private) with an immutable digest,
-a signed OIDC provenance attestation, and an SBOM. The recorded Apple image
+an SBOM attestation, and no signed provenance (GitHub artifact attestation for a private repo needs Enterprise Cloud; see the qualification spec). The recorded Apple image
 digest is evidence for a local qualification artifact, not a pullable registry
 manifest; a pullable manifest exists only after a release tag is pushed
 (Issue #12).
 
 GHCR package visibility is a one-time settings invariant, not a per-run check.
-A container package inherits its visibility from the owning repository on first
-publication, so the first push from this private repository creates a **private**
-package. The workflow does not assert visibility per run: there is no reliable
-read of a private user-owned package's visibility from the workflow
-`GITHUB_TOKEN`, and a check that fails closed on exactly the private packages it
-should pass is worse than none. If the package already exists, confirm once in
-the repository's package settings that its visibility is Private.
+The first publication of a GHCR package defaults to **private**. Visibility is a
+package-level setting: a linked package inherits the repository's access
+_permissions_, not its _visibility_, so maintainers must set and preserve
+Private in the package settings rather than assume it follows the repo. The
+workflow does not assert visibility per run: there is no reliable read of a
+private user-owned package's visibility from the workflow `GITHUB_TOKEN` (the
+`/users/{owner}/packages/...` endpoint is documented for public metadata and
+404s otherwise), and a check that fails closed on exactly the private packages it
+should pass is worse than none. Confirm once in the package settings that
+visibility is Private, and preserve it.
 
 The supported launcher mounts `/home/pentest` as a private writable tmpfs owned
 by UID/GID 1000 with mode `0700`. Release integration must retain the ownership,
