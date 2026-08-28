@@ -201,7 +201,7 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+          if [[ ! "$REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$ ]]; then
             echo "::error::Release tag '$REF_NAME' is not vMAJOR.MINOR.PATCH (optional -prerelease; no +build, container tags forbid "+"). Refusing to publish."
             exit 1
           fi
@@ -324,7 +324,7 @@ jobs:
           # argument, never interpolated into a script body, and is constrained
           # to the SAME grammar the publish job validated before pushing, so the
           # two jobs never disagree about which tags are releasable.
-          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+          if [[ ! "$REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$ ]]; then
             echo "::error::record-evidence expects a vMAJOR.MINOR.PATCH tag, got '$REF_NAME'"; exit 1
           fi
           dest="release-evidence/$REF_NAME"
