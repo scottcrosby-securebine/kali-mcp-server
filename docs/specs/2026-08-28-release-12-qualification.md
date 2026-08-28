@@ -10,15 +10,19 @@ resolves blockers #62, #63, #64, #65, #66. Issue-ref resolution:
 - **Registry (#62): "GHCR, private."** Push the image to
   `ghcr.io/scottcrosby-securebine/kali-mcp-server`, private visibility, with an
   immutable digest. Pulls need auth.
-- **Signing (#63): "OIDC + attestation" — REVISED 2026-08-28 to "private, drop
-  signed attestation."** GitHub artifact attestation for a **private** repo
-  requires Enterprise Cloud, which conflicts with the private-registry decision
-  on a non-EE plan, so the signed OIDC provenance step is dropped. The release
-  grants only `packages: write` and publishes an SBOM attestation via
-  `build-push-action` `sbom: true`. #12 AC5 is met by the immutable digest + the
-  SBOM, not by signed provenance. If the account later moves to Enterprise
-  Cloud, re-add `actions/attest-build-provenance` (+ `id-token: write`,
-  `attestations: write`).
+- **Signing (#63): "OIDC + attestation" — REVISED twice to "digest-only."**
+  (1) 2026-08-28: signed OIDC provenance dropped — GitHub artifact attestation
+  for a **private** repo needs Enterprise Cloud, which conflicts with the
+  private-registry decision on a non-EE plan. (2) 2026-08-29: the BuildKit SBOM
+  attestation (`sbom: true`) dropped too — the SPDX SBOM for this full Kali image
+  exceeds BuildKit's 40 MiB attestation limit and fails the push. The release
+  grants only `packages: write` and attaches no build-time attestation
+  (`provenance: false`, `sbom: false`); **#12 AC5 is met by the immutable
+  digest.** On-demand SBOMs remain available through the image's `syft_sbom` MCP
+  tool. If the account later moves to Enterprise Cloud, re-add
+  `actions/attest-build-provenance` (+ `id-token: write`, `attestations: write`);
+  an SBOM, if wanted durably, is generated out-of-band via syft, not as a
+  BuildKit attestation.
 - **Evidence retention (#64 package-lock, #65 CapEff): "Commit to
   release-evidence/."** Per-release package and CapEff evidence lands durably in
   the git tree under `release-evidence/`, not only as an expiring CI artifact.
