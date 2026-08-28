@@ -179,7 +179,7 @@ different lanes can run concurrently; rows in the same lane cannot.
 | 13 | W1 | E | #45-image, pocl/ocl-icd in `packages.lock` | 1 | - | | |
 | 14 | W1 | E | #25a template set + manifest + `test_nuclei_adapter.py:96` | 1 | - | | |
 | 15 | W2 | B | #43 `web_audit:2955` stop pre-prefixing | 9 | done | see log; user chose resolve-once | |
-| 16 | W2 | D | #26b entries dedupe, `generate_report:3176` | 4 | - | | drop-vs-merge undecided |
+| 16 | W2 | D | #26b entries dedupe, `generate_report:3176` | 4 | done | see log; drop-vs-merge SETTLED: keep-newest | |
 | 17 | W2 | B/D | #14 wordlist defaults, 3 fuzzer sites only | 10 | - | | |
 | 18 | W3 | A | #26a + #48 + #49 merged, `render_combined:1023-1043` | 8, 15, 16 | - | | |
 | 19 | W4 | A | #28 + #24-info merged, `:997` + `slots:913` | 18 | - | | |
@@ -199,6 +199,7 @@ One line per session. Append, never edit.
 | 2026-08-28 | Merged PR #16, closed #2 as completed, appended verified corrections to 7 issue bodies. | 2, 3, 4 |
 | 2026-08-28 | User deferred row 1 (no push). Rows 5-14 proceed locally on the branch. | 1 -> blocked |
 | 2026-08-28 | #47: `stdin=DEVNULL` guard at the one spawn seam, pinned by 4 tests in `tests/test_issue_47.py`. Mutation-proved: removing the guard fails 2 of them, one after a real 10s block. | 5 -> done |
+| 2026-08-28 | #26b: no-ref generate_report keeps the newest result per (scanner, target_ref); re-runs of one scan (web_audit's internal captures, any re-scan) no longer render duplicate sections or sum findings. DECISION keep-newest, NOT merge: two result docs for one (scanner,target) are re-runs, not corroboration; #41's occurrence count is finding-level and gets honest input this way. Scheme-variant dedupe stays row 18. | 16 -> done |
 | 2026-08-28 | #43: web_audit resolves the scheme ONCE (port-implied) and hands it to every child, rather than the issue's literal pass-through, which would have left 4 of 5 stages on blind http://. USER RULING: resolve-once. Extracted the #36 resolver to `resolve_web_scheme`, shared with web_headers. Bare host -> https everywhere, TLS stage now runs; pinned contract updated http->https + sslscan added. | 15 -> done |
 | 2026-08-28 | #45 server half: `--self-test-disable` added to the hashcat command (an addition, not a `--force` swap). #45 stays OPEN for row 13's image half. | 11 -> done |
 | 2026-08-28 | #56: hashcat wordlist now required, no default and no missing->dirb swap, on the hydra_attack #52B template. Legacy contract updated to pass an explicit list. `--force` left for row 11. | 10 -> done |
