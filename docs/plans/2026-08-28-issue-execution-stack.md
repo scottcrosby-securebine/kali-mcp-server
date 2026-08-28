@@ -168,7 +168,7 @@ different lanes can run concurrently; rows in the same lane cannot.
 | 2 | W0 | F | Merge PR #16 (docs truth) | — | done | `756e199` on main | |
 | 3 | W0 | F | Close or relabel #2 | — | done | closed as completed, `ready-for-agent` removed | |
 | 4 | W0 | F | Amend 7 issue bodies (see table above) | — | done | #47 #44 #24 #26 #14 #56 #45 | |
-| 5 | W1 | D | #47 session-killer, `execute_command:359` | 1 | - | | |
+| 5 | W1 | D | #47 session-killer, `execute_command:359` | 1 | done | see log | |
 | 6 | W1 | D | #51 RecursionError, `:3157` | 1 | - | | |
 | 7 | W1 | D | #24-versions, `_tool_version_metadata:1207` | 1, 4 | - | | |
 | 8 | W1 | A | #55 render caps + module constant + owns `test_wave2_gate.py:134` | 1 | - | | |
@@ -198,3 +198,4 @@ One line per session. Append, never edit.
 | 2026-08-28 | Built this plan: 3 mapping agents, 1 adversarial pass. Closed #27's code work (7 commits, unmerged). | — |
 | 2026-08-28 | Merged PR #16, closed #2 as completed, appended verified corrections to 7 issue bodies. | 2, 3, 4 |
 | 2026-08-28 | User deferred row 1 (no push). Rows 5-14 proceed locally on the branch. | 1 -> blocked |
+| 2026-08-28 | #47: `stdin=DEVNULL` guard at the one spawn seam, pinned by 4 tests in `tests/test_issue_47.py`. Mutation-proved: removing the guard fails 2 of them, one after a real 10s block. | 5 -> done |
