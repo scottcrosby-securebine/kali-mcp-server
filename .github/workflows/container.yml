@@ -184,8 +184,6 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v')
-    # One publish per tag. Without this a rerun or a concurrent push of the same
-    # tag races the evidence branch/PR; the loser fails rather than colliding.
     runs-on: ubuntu-latest
     permissions:
       contents: read

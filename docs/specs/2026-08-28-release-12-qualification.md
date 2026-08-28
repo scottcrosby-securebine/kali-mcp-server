@@ -59,10 +59,11 @@ is possible too (#62's literal anchor), but CI does not route through it.
 
 ## Phases
 
-- **P1 — publish + attest + evidence pipeline.** `container.yml` (tag trigger,
-  gated publish job to GHCR private, digest, provenance+SBOM attestation,
-  scoped `packages: write`+`id-token: write`, CapEff capture, per-release
-  evidence commit), `docker-bake.hcl` (overridable output).
+- **P1 — publish + SBOM + evidence pipeline.** `container.yml` (tag trigger,
+  gated publish job to GHCR private, immutable digest, SBOM attestation via
+  `sbom: true` (signed provenance dropped per the revised #63), scoped
+  `packages: write` only, CapEff capture, per-release evidence commit),
+  `docker-bake.hcl` (overridable output).
 - **P2 — scope limitation + qualification closeout.** #66 docs (README,
   container-build record), the 4→5 additions print-string correction
   (integration test), local qualification run recorded, tracker row 24.
