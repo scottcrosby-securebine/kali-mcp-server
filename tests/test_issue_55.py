@@ -102,7 +102,7 @@ class CombinedResultsAreBounded(unittest.TestCase):
             for i in range(self.cap + 7)
         ]
         rendered = _combined(self.server, results)
-        self.assertEqual(self.cap, rendered.count('class="scanner-head"'))
+        self.assertEqual(self.cap, rendered.count('class="scan-row"'))
         self.assertIn("7 older result(s) omitted", rendered)
 
     def test_the_newest_results_are_the_ones_kept(self):
@@ -121,7 +121,7 @@ class CombinedResultsAreBounded(unittest.TestCase):
     def test_a_session_under_the_cap_is_untouched_and_says_nothing(self):
         results = [_result(self.server, [_finding(i)], target=f"t{i}") for i in range(4)]
         rendered = _combined(self.server, results)
-        self.assertEqual(4, rendered.count('class="scanner-head"'))
+        self.assertEqual(4, rendered.count('class="scan-row"'))
         self.assertNotIn("older result(s) omitted", rendered)
 
 

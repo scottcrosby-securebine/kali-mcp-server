@@ -100,7 +100,7 @@ class SchemeVariantTargetsCollapseToOneSection(unittest.TestCase):
             _result("nikto", "10.0.0.5:80", [{"id": "a", "Severity": "INFO", "Title": "T"}]),
             _result("nikto", "http://10.0.0.5:80", [{"id": "b", "Severity": "INFO", "Title": "NEW"}]),
         ])
-        self.assertEqual(1, len(re.findall(r'class="scanner-head"', report)))
+        self.assertEqual(1, len(re.findall(r'class="scan-row"', report)))
         # Newest of the collapsed pair wins.
         self.assertIn("NEW", report)
 
@@ -109,7 +109,7 @@ class SchemeVariantTargetsCollapseToOneSection(unittest.TestCase):
             _result("nikto", "http://a.example", [{"id": "1", "Severity": "INFO", "Title": "T"}]),
             _result("nikto", "http://b.example", [{"id": "2", "Severity": "INFO", "Title": "T"}]),
         ])
-        self.assertEqual(2, len(re.findall(r'class="scanner-head"', report)))
+        self.assertEqual(2, len(re.findall(r'class="scan-row"', report)))
 
 
 class SingleRefDedupesLikeCombined(unittest.TestCase):

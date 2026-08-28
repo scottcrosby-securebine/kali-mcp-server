@@ -61,7 +61,7 @@ class NoRefReportCollapsesReRunsOfOneScan(unittest.TestCase):
             _doc("whatweb", "http://h", [{"id": "a", "Severity": "INFO", "Title": "T"}]),
         ])
         # Two identical whatweb captures -> one section, not two.
-        self.assertEqual(1, len(re.findall(r'class="scanner-head"', report)))
+        self.assertEqual(1, len(re.findall(r'class="scan-row"', report)))
 
     def test_findings_are_not_summed_across_the_duplicates(self):
         report = self._render([
@@ -85,14 +85,14 @@ class NoRefReportCollapsesReRunsOfOneScan(unittest.TestCase):
             _doc("nikto", "http://h", [{"id": "b", "Severity": "INFO", "Title": "T"}]),
             _doc("nuclei", "http://h", [{"id": "c", "Severity": "INFO", "Title": "T"}]),
         ])
-        self.assertEqual(3, len(re.findall(r'class="scanner-head"', report)))
+        self.assertEqual(3, len(re.findall(r'class="scan-row"', report)))
 
     def test_one_scanner_on_distinct_targets_is_kept(self):
         report = self._render([
             _doc("whatweb", "http://a", [{"id": "1", "Severity": "INFO", "Title": "T"}]),
             _doc("whatweb", "http://b", [{"id": "2", "Severity": "INFO", "Title": "T"}]),
         ])
-        self.assertEqual(2, len(re.findall(r'class="scanner-head"', report)))
+        self.assertEqual(2, len(re.findall(r'class="scan-row"', report)))
 
 
 if __name__ == "__main__":

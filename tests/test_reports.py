@@ -324,9 +324,9 @@ class ReportTests(unittest.TestCase):
                 response = asyncio.run(self.server.generate_report())  # no ref
             self.assertEqual(f"/reports/{'R' * 32}.html", response)
             report = (reports / f"{'R' * 32}.html").read_text(encoding="utf-8")
-            # Combined title and per-scanner sections.
+            # Combined title and one provenance row per scan (fix-first IA, #41).
             self.assertIn("<h1>Combined scan report</h1>", report)
-            self.assertIn('class="scanner-head"', report)
+            self.assertIn('class="scan-row"', report)
             for scanner in ("nmap", "nuclei", "sslscan"):
                 self.assertIn(scanner, report)
             # Exact-dedupe: CVE-9 counted once, aggregate HIGH == 1.
