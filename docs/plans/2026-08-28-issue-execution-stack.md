@@ -183,7 +183,7 @@ different lanes can run concurrently; rows in the same lane cannot.
 | 17 | W2 | B/D | #14 wordlist defaults, 3 fuzzer sites only | 10 | done | see log; real-container AC half deferred | |
 | 18 | W3 | A | #26a + #48 + #49 merged, `render_combined:1023-1043` | 8, 15, 16 | done | see log | |
 | 19 | W4 | A | #28 + #24-info merged, `:997` + `slots:913` | 18 | done | see log; INFO line suppressed, remediation/refs promoted | |
-| 20 | W4 | E | #25b nuclei coverage surfacing | 14 | - | | |
+| 20 | W4 | A | #25b nuclei coverage surfacing | 18 | done | see log; count+version surfaced, caution when set small | |
 | 21 | W5 | A | #39 + #40 merged, render-time, baked feeds, staleness rule | 19 | - | | |
 | 22 | W6 | A | #41 report IA rewrite | 19, 20, 21 | - | | |
 | 23 | W7 | F | File 5 structural release blockers as issues | — | - | | |
@@ -209,3 +209,4 @@ One line per session. Append, never edit.
 | 2026-08-28 | #55: `MAX_REPORT_FINDINGS=500` / `MAX_REPORT_RESULTS=50`, both disclosed, severity counted over all findings. The plan predicted this would break `test_wave2_gate.py:134` (151 articles) on the assumption of a 100 cap from `list_items`; 500 is the defensible ceiling and that test needed no edit. | 8 -> done |
 | 2026-08-28 | #51 + #24-versions. #51: loader routes through `_load_json`. #24: package map re-keyed onto scanner labels, all 24 resolve. Coverage test derives the scanner list from the `generate_report` filter rather than copying it. | 6, 7 -> done |
 | 2026-08-28 | Row 19: #28 remediation/references at parser layer (nikto See:+header fix, nuclei info.reference/remediation, TLS proto/cipher canonical) + #24-INFO render suppression. Full suite 361 ok, differential exit 0. | 19 |
+| 2026-08-28 | Row 20: #25b nuclei surfaces template coverage (count+promoted version in output and metadata; ⚠️ caution when a small set returns 0). Needs recut 14->18: surfacing reads the count at runtime, no dep on #25a expansion. Full suite 369 ok, differential exit 0. | 20 |
