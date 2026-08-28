@@ -175,7 +175,7 @@ different lanes can run concurrently; rows in the same lane cannot.
 | 9 | W1 | B | #46 + #44 merged, one scheme predicate, 9 sites | 1, 4 | done | see log; 10 sites, not 9 | |
 | 10 | W1 | C | #56 hashcat wordlist, owns `:2760-2761` | 1, 4 | done | see log; `--force` at 2863 untouched for row 11 | |
 | 11 | W1 | C | #45-server, add `--self-test-disable` at `:2763` | 10 | done | see log | |
-| 12 | W1 | E | #15 amass, image layer | 1 | - | | needs container evidence |
+| 12 | W1 | E | #15 amass, image layer | 1 | done | see log; direct binary path, boundary regression in built image | |
 | 13 | W1 | E | #45-image, pocl/ocl-icd in `packages.lock` | 1 | done | see log; pinned + hashcat cracks in built image | |
 | 14 | W1 | E | #25a template set + manifest + `test_nuclei_adapter.py:96` | 1 | - | | |
 | 15 | W2 | B | #43 `web_audit:2955` stop pre-prefixing | 9 | done | see log; user chose resolve-once | |
@@ -214,3 +214,4 @@ One line per session. Append, never edit.
 | 2026-08-28 | Row 22: #41 combined-report IA rewrite to a fix-first, package-grouped queue (S1-S8, scriptless <details> disclosure). New _COMBINED_TEMPLATE; render_combined rewritten; single-ref left as-is (D2). Migrated 4 tests scanner-head->scan-row. Full suite 387 ok, differential exit 0. Spec approved: docs/specs/2026-08-28-report-ia-41.md. | 22 |
 | 2026-08-28 | Row 23: filed the 5 structural release blockers as #62-#66 (ready-for-human), each with verified evidence; linked under #12. | 23 |
 | 2026-08-28 | Row 13: pinned OpenCL runtime (ocl-icd-libopencl1, pocl-opencl-icd) in packages.lock. Local build passes version-verify; hashcat CRACKS md5(password) in the built image with row-11's --self-test-disable baked in; image verifier + full suite (387) green. Empirical: PoCL runs the real kernels, only the self-test fails, so row 11 was the functional fix and this pins the runtime. Closes #45. | 13 |
+| 2026-08-28 | Row 12: #15 amass_enum bypasses the sudo libpostal wrapper by targeting /usr/lib/amass/amass directly (AMASS_BINARY, host-fallback to PATH). Reproduced the wrapper failure and verified the safe entrypoint + boundary regression in the built image (v5.1.1 under NNP/cap-drop; wrapper sudo-fails). Added the regression to run_container_integration.py. Host suite 387 ok. Closes #15. | 12 |
