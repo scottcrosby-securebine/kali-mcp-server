@@ -10,6 +10,104 @@
       "sha256": "29f0b144f7e898332daf452a6705421accd962a4996bb0f3dd97695cb2025134",
       "source_path": "http/cves/2021/CVE-2021-41773.yaml",
       "review_note": "Promoted detection-only variant excludes the upstream command-execution POST request."
+    },
+    {
+      "id": "CVE-2014-6271",
+      "path": "CVE-2014-6271.yaml",
+      "sha256": "077d5737a5920ea61b69f1f4ad421f70613f3f440cb62c34b0eefbc3330bcd85",
+      "source_path": "http/cves/2014/CVE-2014-6271.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2017-5638",
+      "path": "CVE-2017-5638.yaml",
+      "sha256": "be4fa3ece80efe8426c214fa656f58d772b5302672990b42f224c7d5ee8ccffd",
+      "source_path": "http/cves/2017/CVE-2017-5638.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2018-1000861",
+      "path": "CVE-2018-1000861.yaml",
+      "sha256": "678e58f8c1ed292f2076b96eee6d009045ae04d5d633bd31f56c9dd9cec87ed8",
+      "source_path": "http/cves/2018/CVE-2018-1000861.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2018-13379",
+      "path": "CVE-2018-13379.yaml",
+      "sha256": "0953e752633e5657eed0512483be1953a76db91b049466b7c834f798d18cc839",
+      "source_path": "http/cves/2018/CVE-2018-13379.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2019-11510",
+      "path": "CVE-2019-11510.yaml",
+      "sha256": "d945b3ac7f8770458a4b36d0b915d7a58dd70e00679dadad7b262961d50ae108",
+      "source_path": "http/cves/2019/CVE-2019-11510.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2019-19781",
+      "path": "CVE-2019-19781.yaml",
+      "sha256": "3dca01ad31b67ebc6c588c4d8abd173a9b95db056369ee86edf9cad87f6b6bdc",
+      "source_path": "http/cves/2019/CVE-2019-19781.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2020-17530",
+      "path": "CVE-2020-17530.yaml",
+      "sha256": "77cf8ed203cc64176a65245468ce07716a0aa55c78f2552bb2bda41358a722c2",
+      "source_path": "http/cves/2020/CVE-2020-17530.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2020-3187",
+      "path": "CVE-2020-3187.yaml",
+      "sha256": "f1f1b6ec7250c5451dda659dd90c1e36ed6cce4e6f99dadcae2382fd91236b5b",
+      "source_path": "http/cves/2020/CVE-2020-3187.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2021-21972",
+      "path": "CVE-2021-21972.yaml",
+      "sha256": "dea63bf7a32e5f5a77441a4480576d1717e93c4ca91fcac40a002038b4ab987d",
+      "source_path": "http/cves/2021/CVE-2021-21972.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2021-22205",
+      "path": "CVE-2021-22205.yaml",
+      "sha256": "fda2aa667d6a236ac77bc4a2540f85279d3effa62b7b5beafcd5182e65ff0bfd",
+      "source_path": "http/cves/2021/CVE-2021-22205.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2021-34473",
+      "path": "CVE-2021-34473.yaml",
+      "sha256": "43de3a8aa76f2f10e8cd2d0b12f42574d9cf962e46d207d088c1ba8fd762b78e",
+      "source_path": "http/cves/2021/CVE-2021-34473.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2022-22954",
+      "path": "CVE-2022-22954.yaml",
+      "sha256": "599c9110dc979572045f640a3b4321dffb6a4e9cf938e8fc864ca4b3bf0e89ca",
+      "source_path": "http/cves/2022/CVE-2022-22954.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2023-35078",
+      "path": "CVE-2023-35078.yaml",
+      "sha256": "499e209872d4e49ce7b693760415baa69dc82ae2c192a56c1b6c869468c5ca7a",
+      "source_path": "http/cves/2023/CVE-2023-35078.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
+    },
+    {
+      "id": "CVE-2024-3273",
+      "path": "CVE-2024-3273.yaml",
+      "sha256": "6a1b030042e7b7fa704bdc7a5383692b8eea5eddeb4787d9dbbc958cfd1e73cf",
+      "source_path": "http/cves/2024/CVE-2024-3273.yaml",
+      "review_note": "Promoted detection-only; upstream GET-based version detection, no mutating requests."
     }
   ]
 }

@@ -93,7 +93,18 @@ class NucleiAdapterTests(unittest.TestCase):
 
         self.assertEqual("v10.4.7", manifest["upstream_version"])
         self.assertEqual(1, manifest["schema_version"])
-        self.assertEqual(["CVE-2021-41773.yaml"], [item["path"] for item in manifest["templates"]])
+        # The curated detection-only promoted set (#25a): the hand-trimmed
+        # CVE-2021-41773 variant plus reviewed GET-based KEV web CVE templates.
+        self.assertEqual(
+            sorted([
+                "CVE-2014-6271.yaml", "CVE-2017-5638.yaml", "CVE-2018-1000861.yaml",
+                "CVE-2018-13379.yaml", "CVE-2019-11510.yaml", "CVE-2019-19781.yaml",
+                "CVE-2020-17530.yaml", "CVE-2020-3187.yaml", "CVE-2021-21972.yaml",
+                "CVE-2021-22205.yaml", "CVE-2021-34473.yaml", "CVE-2021-41773.yaml",
+                "CVE-2022-22954.yaml", "CVE-2023-35078.yaml", "CVE-2024-3273.yaml",
+            ]),
+            sorted(item["path"] for item in manifest["templates"]),
+        )
         for item in manifest["templates"]:
             content = (template_root / item["path"]).read_bytes()
             self.assertEqual(item["sha256"], hashlib.sha256(content).hexdigest())
