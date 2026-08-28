@@ -7,9 +7,13 @@ resolves blockers #62, #63, #64, #65, #66. Issue-ref resolution:
 
 ## Anchor — the four release-policy decisions (verbatim, Scott, 2026-08-28)
 
-- **Registry (#62): "GHCR, private."** Push the image to
-  `ghcr.io/scottcrosby-securebine/kali-mcp-server`, private visibility, with an
-  immutable digest. Pulls need auth.
+- **Registry (#62): "GHCR, private" — REVISED 2026-08-29 to "public."** Push the
+  image to `ghcr.io/scottcrosby-securebine/kali-mcp-server` with an immutable
+  digest. The private decision assumed a private source repo; the repo is in
+  fact **public**, so GHCR publishes the package public, and Scott accepted
+  public (2026-08-29). Pulls need no auth. (A public repo also means artifact
+  attestation would no longer require Enterprise Cloud, but provenance/SBOM stay
+  off for the size reason below.)
 - **Signing (#63): "OIDC + attestation" — REVISED twice to "digest-only."**
   (1) 2026-08-28: signed OIDC provenance dropped — GitHub artifact attestation
   for a **private** repo needs Enterprise Cloud, which conflicts with the
@@ -63,9 +67,9 @@ is possible too (#62's literal anchor), but CI does not route through it.
 
 ## Phases
 
-- **P1 — publish + SBOM + evidence pipeline.** `container.yml` (tag trigger,
-  gated publish job to GHCR private, immutable digest, SBOM attestation via
-  `sbom: true` (signed provenance dropped per the revised #63), scoped
+- **P1 — publish + evidence pipeline.** `container.yml` (tag trigger, gated
+  publish job to GHCR public, immutable digest, no build-time attestation
+  (`provenance: false`, `sbom: false` per the revised #63), scoped
   `packages: write` only, CapEff capture, per-release evidence commit),
   `docker-bake.hcl` (overridable output).
 - **P2 — scope limitation + qualification closeout.** #66 docs (README,

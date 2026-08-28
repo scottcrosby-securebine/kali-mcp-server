@@ -215,10 +215,10 @@ jobs:
       # The multi-arch manifest-list digest is the immutable release identity
       # (#12 AC5). No build-time attestations are attached: a BuildKit SBOM for
       # this full Kali image exceeds BuildKit's 40 MiB attestation limit and
-      # fails the push (Scott, 2026-08-29), and signed OIDC provenance needs
-      # Enterprise Cloud for a private repo (Scott, 2026-08-28). AC5 is met by
-      # the immutable digest. On-demand SBOMs remain available via the image's
-      # own syft_sbom MCP tool.
+      # fails the push (Scott, 2026-08-29); signed provenance is left off too.
+      # AC5 is met by the immutable digest. On-demand SBOMs remain available via
+      # the image's own syft_sbom MCP tool. The package publishes PUBLIC, following
+      # the public source repo (Scott, 2026-08-29).
       - name: Build and push multi-arch image
         id: build
         uses: docker/build-push-action@v6
@@ -232,15 +232,10 @@ jobs:
           build-args: |
             VCS_REF=${{ github.sha }}
             BUILD_DATE=${{ github.event.repository.updated_at }}
-      # #62: the package must be PRIVATE. GHCR sets a package's visibility from
-      # the OWNING REPO on first publication, so a first push from this private
-      # repo lands private; visibility is a package/repo setting, not something a
-      # push can assert. There is no reliable read of a PRIVATE user-package's
-      # visibility from GITHUB_TOKEN (the /users/{owner}/packages/... endpoint is
-      # documented for public metadata and 404s otherwise), so this is enforced
-      # as a one-time settings invariant, documented in docs/releases/
-      # container-build.md, not as a per-run API check that would fail closed on
-      # the very packages it is meant to pass.
+      # #62: the package publishes PUBLIC, following the public source repo
+      # (Scott, 2026-08-29 — the original "private" decision assumed a private
+      # repo). Visibility follows the repo and is a package-settings action, not
+      # something the push asserts; see docs/releases/container-build.md.
       #
       # #12 AC2 + #64 + #65: capture the DURABLE release evidence from the object
       # that actually shipped (the published digest), not the earlier smoke build.

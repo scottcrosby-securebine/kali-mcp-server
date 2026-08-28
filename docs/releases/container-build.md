@@ -48,23 +48,20 @@ ordinary operator startup command.
 
 The `build-and-smoke` CI job loads images locally and does not publish.
 Publishing is a separate release-tag job (`publish` in `container.yml`) that
-pushes the multi-architecture image to GHCR (private) with an immutable digest,
-no build-time attestations. Signed provenance needs Enterprise Cloud for a private repo, and a BuildKit SBOM for this image exceeds BuildKit's 40 MiB attestation limit; AC5 rests on the immutable digest, and on-demand SBOMs come from the image's syft_sbom tool. The recorded Apple image
-digest is evidence for a local qualification artifact, not a pullable registry
-manifest; a pullable manifest exists only after a release tag is pushed
-(Issue #12).
+pushes the multi-architecture image to GHCR (**public** — the source repo is
+public, so GHCR publishes the package public) with an immutable digest and no
+build-time attestations. A BuildKit SBOM for this image exceeds BuildKit's
+40 MiB attestation limit, so `sbom: false`; signed provenance is off too
+(`provenance: false`). AC5 rests on the immutable digest, and on-demand SBOMs
+come from the image's `syft_sbom` tool. The recorded Apple image digest is
+evidence for a local qualification artifact, not a pullable registry manifest.
 
-GHCR package visibility is a one-time settings invariant, not a per-run check.
-The first publication of a GHCR package defaults to **private**. Visibility is a
-package-level setting: a linked package inherits the repository's access
-_permissions_, not its _visibility_, so maintainers must set and preserve
-Private in the package settings rather than assume it follows the repo. The
-workflow does not assert visibility per run: there is no reliable read of a
-private user-owned package's visibility from the workflow `GITHUB_TOKEN` (the
-`/users/{owner}/packages/...` endpoint is documented for public metadata and
-404s otherwise), and a check that fails closed on exactly the private packages it
-should pass is worse than none. Confirm once in the package settings that
-visibility is Private, and preserve it.
+GHCR package visibility follows the source repository, which is public, so the
+published package is public and pulls need no auth (accepted 2026-08-29). If a
+private image is ever wanted, the repository is the wrong lever: set the package
+itself Private in its GHCR package settings (there is no REST/CLI to flip
+container visibility — the `/user/packages/.../visibility` PATCH 404s — so it is
+a settings-page action).
 
 The supported launcher mounts `/home/pentest` as a private writable tmpfs owned
 by UID/GID 1000 with mode `0700`. Release integration must retain the ownership,
