@@ -258,6 +258,12 @@ jobs:
           printf 'ghcr.io/%s@%s\ntag: %s\n' "$GITHUB_REPOSITORY" "$DIGEST" "$REF_NAME" > "$dest/published-image.txt"
           for platform in linux/amd64 linux/arm64; do
             pname="${platform//\//-}"
+            # Both platforms resolve from the SAME manifest-list digest, and
+            # `docker pull --platform X repo@<digest>` stores locally under that
+            # one digest ref. Pulling the second platform onto the same ref fails
+            # ("cannot overwrite digest"), so remove any local copy first; each
+            # iteration then pulls its own platform variant cleanly.
+            docker rmi "$ref" >/dev/null 2>&1 || true
             docker pull --platform "$platform" "$ref"
             # AC2: verify the PUBLISHED image against the pinned package lock.
             docker run --rm --platform "$platform" --security-opt=no-new-privileges \
