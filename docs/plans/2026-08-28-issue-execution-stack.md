@@ -186,7 +186,7 @@ different lanes can run concurrently; rows in the same lane cannot.
 | 20 | W4 | A | #25b nuclei coverage surfacing | 18 | done | see log; count+version surfaced, caution when set small | |
 | 21 | W5 | A | #39 + #40 merged, render-time, baked feeds, staleness rule | 19 | done | see log; render engine done, real feed-baking deferred to image layer | |
 | 22 | W6 | A | #41 report IA rewrite | 19, 20, 21 | done | see log; new _COMBINED_TEMPLATE + fix-first render_combined | |
-| 23 | W7 | F | File 5 structural release blockers as issues | — | - | | |
+| 23 | W7 | F | File 5 structural release blockers as issues | — | done | #62 #63 #64 #65 #66, linked under #12 | |
 | 24 | W7 | F | #12 release qualification | all above | - | | needs registry + token scope |
 
 ### Session log
@@ -212,3 +212,4 @@ One line per session. Append, never edit.
 | 2026-08-28 | Row 20: #25b nuclei surfaces template coverage (count+promoted version in output and metadata; ⚠️ caution when a small set returns 0). Needs recut 14->18: surfacing reads the count at runtime, no dep on #25a expansion. Full suite 369 ok, differential exit 0. | 20 |
 | 2026-08-28 | Row 21: #39+#40 render-time EPSS/KEV enrichment engine (feed loaders, CVE join, Not-enriched rule, 30-day staleness). Feeds are baked-file inputs; the render code degrades correctly when absent. Real feed-baking is the deferred image half. Full suite 369 ok, differential exit 0. | 21 |
 | 2026-08-28 | Row 22: #41 combined-report IA rewrite to a fix-first, package-grouped queue (S1-S8, scriptless <details> disclosure). New _COMBINED_TEMPLATE; render_combined rewritten; single-ref left as-is (D2). Migrated 4 tests scanner-head->scan-row. Full suite 387 ok, differential exit 0. Spec approved: docs/specs/2026-08-28-report-ia-41.md. | 22 |
+| 2026-08-28 | Row 23: filed the 5 structural release blockers as #62-#66 (ready-for-human), each with verified evidence; linked under #12. | 23 |
