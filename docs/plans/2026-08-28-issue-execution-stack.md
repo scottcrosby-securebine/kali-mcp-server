@@ -181,7 +181,7 @@ different lanes can run concurrently; rows in the same lane cannot.
 | 15 | W2 | B | #43 `web_audit:2955` stop pre-prefixing | 9 | done | see log; user chose resolve-once | |
 | 16 | W2 | D | #26b entries dedupe, `generate_report:3176` | 4 | done | see log; drop-vs-merge SETTLED: keep-newest | |
 | 17 | W2 | B/D | #14 wordlist defaults, 3 fuzzer sites only | 10 | done | see log; real-container AC half deferred | |
-| 18 | W3 | A | #26a + #48 + #49 merged, `render_combined:1023-1043` | 8, 15, 16 | - | | |
+| 18 | W3 | A | #26a + #48 + #49 merged, `render_combined:1023-1043` | 8, 15, 16 | done | see log | |
 | 19 | W4 | A | #28 + #24-info merged, `:997` + `slots:913` | 18 | - | | |
 | 20 | W4 | E | #25b nuclei coverage surfacing | 14 | - | | |
 | 21 | W5 | A | #39 + #40 merged, render-time, baked feeds, staleness rule | 19 | - | | |
@@ -199,6 +199,7 @@ One line per session. Append, never edit.
 | 2026-08-28 | Merged PR #16, closed #2 as completed, appended verified corrections to 7 issue bodies. | 2, 3, 4 |
 | 2026-08-28 | User deferred row 1 (no push). Rows 5-14 proceed locally on the branch. | 1 -> blocked |
 | 2026-08-28 | #47: `stdin=DEVNULL` guard at the one spawn seam, pinned by 4 tests in `tests/test_issue_47.py`. Mutation-proved: removing the guard fails 2 of them, one after a real 10s block. | 5 -> done |
+| 2026-08-28 | Row 18 (#26a+#48+#49): extracted `_dedupe_findings` shared by combined and single-ref paths. #48: transcript identity now includes a noise-stripped evidence digest, so a fail-then-success no longer collapses to the oldest. #26a: `_normalize_target_for_dedupe` strips a leading scheme so http://h:80 and h:80 are one section (applied to #26b's entries key too). #49: single-ref path dedupes like combined. The three wave2 noise-collapse tests still pass; M2 confirms noise-stripping is what holds them. | 18 -> done |
 | 2026-08-28 | #14: ffuf/gobuster/wfuzz default wordlist corrected to /usr/share/dirb/wordlists/common.txt (dirb builds from source there; the apt path was absent), shared as DEFAULT_WEB_WORDLIST so the three cannot drift. hashcat's copy was #56's. Real-container AC half (file present in built image) deferred to a container run. | 17 -> done |
 | 2026-08-28 | #26b: no-ref generate_report keeps the newest result per (scanner, target_ref); re-runs of one scan (web_audit's internal captures, any re-scan) no longer render duplicate sections or sum findings. DECISION keep-newest, NOT merge: two result docs for one (scanner,target) are re-runs, not corroboration; #41's occurrence count is finding-level and gets honest input this way. Scheme-variant dedupe stays row 18. | 16 -> done |
 | 2026-08-28 | #43: web_audit resolves the scheme ONCE (port-implied) and hands it to every child, rather than the issue's literal pass-through, which would have left 4 of 5 stages on blind http://. USER RULING: resolve-once. Extracted the #36 resolver to `resolve_web_scheme`, shared with web_headers. Bare host -> https everywhere, TLS stage now runs; pinned contract updated http->https + sslscan added. | 15 -> done |
