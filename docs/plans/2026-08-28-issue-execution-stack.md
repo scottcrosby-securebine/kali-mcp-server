@@ -169,8 +169,8 @@ different lanes can run concurrently; rows in the same lane cannot.
 | 3 | W0 | F | Close or relabel #2 | — | done | closed as completed, `ready-for-agent` removed | |
 | 4 | W0 | F | Amend 7 issue bodies (see table above) | — | done | #47 #44 #24 #26 #14 #56 #45 | |
 | 5 | W1 | D | #47 session-killer, `execute_command:359` | 1 | done | see log | |
-| 6 | W1 | D | #51 RecursionError, `:3157` | 1 | - | | |
-| 7 | W1 | D | #24-versions, `_tool_version_metadata:1207` | 1, 4 | - | | |
+| 6 | W1 | D | #51 RecursionError, `:3157` | 1 | done | see log | |
+| 7 | W1 | D | #24-versions, `_tool_version_metadata:1207` | 1, 4 | done | see log | |
 | 8 | W1 | A | #55 render caps + module constant + owns `test_wave2_gate.py:134` | 1 | - | | |
 | 9 | W1 | B | #46 + #44 merged, one scheme predicate, 9 sites | 1, 4 | - | | |
 | 10 | W1 | C | #56 hashcat wordlist, owns `:2760-2761` | 1, 4 | - | | |
@@ -199,3 +199,4 @@ One line per session. Append, never edit.
 | 2026-08-28 | Merged PR #16, closed #2 as completed, appended verified corrections to 7 issue bodies. | 2, 3, 4 |
 | 2026-08-28 | User deferred row 1 (no push). Rows 5-14 proceed locally on the branch. | 1 -> blocked |
 | 2026-08-28 | #47: `stdin=DEVNULL` guard at the one spawn seam, pinned by 4 tests in `tests/test_issue_47.py`. Mutation-proved: removing the guard fails 2 of them, one after a real 10s block. | 5 -> done |
+| 2026-08-28 | #51 + #24-versions. #51: loader routes through `_load_json`. #24: package map re-keyed onto scanner labels, all 24 resolve. Coverage test derives the scanner list from the `generate_report` filter rather than copying it. | 6, 7 -> done |
