@@ -4,8 +4,14 @@ on:
   pull_request:
   push:
     branches: [main]
+    # Release tags drive the publish + evidence-commit jobs below. Those jobs
+    # are `if`-gated to `refs/tags/`, so PR and branch pushes never publish.
+    tags: ["v*"]
   workflow_dispatch:
 
+# Least privilege for the default jobs. The publish and record-evidence jobs
+# raise their own scopes locally; nothing here can push a package or write the
+# tree.
 permissions:
   contents: read
 
@@ -141,14 +147,131 @@ jobs:
         run: docker run --rm --platform "${{ matrix.platform }}" --security-opt=no-new-privileges --entrypoint verify-kali-mcp-image kali-mcp:smoke
       - name: Run hermetic container integration gate
         run: python3 tests/integration/run_container_integration.py --image kali-mcp:smoke --platform "${{ matrix.platform }}"
-      - name: Record package and image evidence
+      - name: Record package, image, and capability evidence
+        env:
+          PLATFORM: ${{ matrix.platform }}
         run: |
+          set -euo pipefail
           mkdir -p release-evidence
-          platform_name="${{ matrix.platform }}"
-          platform_name="${platform_name//\//-}"
+          platform_name="${PLATFORM//\//-}"
           docker image inspect kali-mcp:smoke > "release-evidence/${platform_name}-image.json"
-          docker run --rm --platform "${{ matrix.platform }}" --entrypoint dpkg-query kali-mcp:smoke -W '-f=${Package}\t${Version}\t${Architecture}\n' > "release-evidence/${platform_name}-packages.tsv"
+          docker run --rm --platform "$PLATFORM" --entrypoint dpkg-query kali-mcp:smoke -W '-f=${Package}\t${Version}\t${Architecture}\n' > "release-evidence/${platform_name}-packages.tsv"
+          # #65: record the effective capability set observed under the SAME
+          # hardened flags the launcher applies (cap-drop=ALL, no-new-privileges,
+          # read-only). The integration gate above asserts this is empty; this
+          # step captures the observation as a durable, reviewable artifact.
+          # An empty set prints as 0000000000000000.
+          docker run --rm --platform "$PLATFORM" \
+            --security-opt=no-new-privileges --cap-drop=ALL --read-only \
+            --entrypoint awk kali-mcp:smoke \
+            '/^CapEff:/ { print $2 }' /proc/self/status \
+            > "release-evidence/${platform_name}-capeff.txt"
+          echo "CapEff ($platform_name): $(cat "release-evidence/${platform_name}-capeff.txt")"
       - uses: actions/upload-artifact@v4
         with:
           name: release-evidence-${{ strategy.job-index }}
           path: release-evidence/
+
+  # ---- Release publish (#12 AC5, #62, #63) --------------------------------
+  # Runs ONLY on a release tag, after both platform smoke builds pass. Holds
+  # the publish scopes; no other job can push a package or mint an attestation.
+  publish:
+    needs: build-and-smoke
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write      # push image to GHCR (#63)
+      id-token: write       # OIDC keyless attestation (#63)
+      attestations: write   # record the provenance attestation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Image is created private by GHCR default while the package has no
+      # explicit visibility; #62 chose private. The multi-arch digest is the
+      # immutable release identity (#12 AC5). provenance+sbom attach in-registry
+      # attestations; the OIDC-signed provenance below adds a Sigstore record.
+      - name: Build and push multi-arch image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+      - name: Attest build provenance (OIDC keyless)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Record published digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          printf 'ghcr.io/%s@%s\ntag: %s\n' "$GITHUB_REPOSITORY" "$DIGEST" "$REF_NAME"
+
+  # ---- Durable evidence (#64, #65) ----------------------------------------
+  # On a release tag, gather the per-platform evidence the smoke builds produced
+  # and open a PR that commits it under release-evidence/<tag>/. CI never pushes
+  # to a protected branch directly; a maintainer merges the PR (dev -> PR -> merge).
+  record-evidence:
+    needs: build-and-smoke
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # push the evidence branch
+      pull-requests: write    # open the PR
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download evidence artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-evidence-*
+          path: _evidence
+          merge-multiple: true
+      - name: Open evidence PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # REF_NAME is attacker-influenceable (whoever pushes the tag), so it
+          # only ever reaches git/gh as an argument, never interpolated into a
+          # script body, and is constrained to a release-tag shape first.
+          case "$REF_NAME" in
+            v[0-9]*) : ;;
+            *) echo "::error::record-evidence expects a v* release tag, got '$REF_NAME'"; exit 1 ;;
+          esac
+          dest="release-evidence/$REF_NAME"
+          mkdir -p "$dest"
+          cp -a _evidence/. "$dest"/
+          rm -rf _evidence
+          if git diff --quiet -- "$dest"; then
+            echo "::notice::No new evidence for $REF_NAME; nothing to commit."
+            exit 0
+          fi
+          branch="release-evidence/$REF_NAME"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add "$dest"
+          git commit -m "chore(release-evidence): record $REF_NAME package, image, and CapEff evidence"
+          git push --set-upstream origin "$branch"
+          gh pr create --fill --base main --head "$branch" \
+            --title "release-evidence: $REF_NAME" \
+            --body "Automated: durable package, image, and CapEff evidence for release $REF_NAME (#64, #65)."

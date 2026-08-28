@@ -27,8 +27,10 @@ Darwin/arm64 Docker Desktop qualification passed for the local arm64 image in
 The evidence records its exact local image digest, daemon identity, Docker
 Desktop platform, disabled Docker Offload state, and integration result.
 It predates commit `ba00f3a`, which made `/home/pentest` privately writable and
-added ownership, mode, and write checks to the integration gate. Refresh this
-structured Darwin evidence against the current launcher before final release.
+added ownership, mode, and write checks to the integration gate, so it should be
+refreshed when a maintainer next has Apple hardware. macOS qualification is a
+best-effort tier and does not gate the release (see the README runtime model);
+the Linux amd64/arm64 CI gate is the release gate.
 
 Maintainers capture that evidence with the release qualification entry point:
 
@@ -44,12 +46,13 @@ Docker Offload stopped and unconfigured, and a digest-qualified image reference
 matching `--image-digest`. This is a maintainer qualification command, not an
 ordinary operator startup command.
 
-The current local-load workflow does not publish an image, SBOM, or signed
-provenance attestation. The recorded Apple image digest is therefore evidence
-for that local qualification artifact, not a pullable multi-architecture
-registry manifest. Publishing and qualifying the final registry manifest and
-its release artifacts remain Issue #12 work; this limitation must remain
-visible until that step exists.
+The `build-and-smoke` CI job loads images locally and does not publish.
+Publishing is a separate release-tag job (`publish` in `container.yml`) that
+pushes the multi-architecture image to GHCR (private) with an immutable digest,
+a signed OIDC provenance attestation, and an SBOM. The recorded Apple image
+digest is evidence for a local qualification artifact, not a pullable registry
+manifest; a pullable manifest exists only after a release tag is pushed
+(Issue #12).
 
 The supported launcher mounts `/home/pentest` as a private writable tmpfs owned
 by UID/GID 1000 with mode `0700`. Release integration must retain the ownership,

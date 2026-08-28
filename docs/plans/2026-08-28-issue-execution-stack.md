@@ -187,7 +187,7 @@ different lanes can run concurrently; rows in the same lane cannot.
 | 21 | W5 | A | #39 + #40 merged, render-time, baked feeds, staleness rule | 19 | done | see log; render engine done, real feed-baking deferred to image layer | |
 | 22 | W6 | A | #41 report IA rewrite | 19, 20, 21 | done | see log; new _COMBINED_TEMPLATE + fix-first render_combined | |
 | 23 | W7 | F | File 5 structural release blockers as issues | — | done | #62 #63 #64 #65 #66, linked under #12 | |
-| 24 | W7 | F | #12 release qualification | all above | - | | needs registry + token scope |
+| 24 | W7 | F | #12 release qualification | all above | WIP | pipeline + docs on `feat/release-12-qualification` | publish/attest ACs execute only on a release tag |
 
 ### Session log
 
@@ -216,3 +216,4 @@ One line per session. Append, never edit.
 | 2026-08-28 | Row 13: pinned OpenCL runtime (ocl-icd-libopencl1, pocl-opencl-icd) in packages.lock. Local build passes version-verify; hashcat CRACKS md5(password) in the built image with row-11's --self-test-disable baked in; image verifier + full suite (387) green. Empirical: PoCL runs the real kernels, only the self-test fails, so row 11 was the functional fix and this pins the runtime. Closes #45. | 13 |
 | 2026-08-28 | Row 12: #15 amass_enum bypasses the sudo libpostal wrapper by targeting /usr/lib/amass/amass directly (AMASS_BINARY, host-fallback to PATH). Reproduced the wrapper failure and verified the safe entrypoint + boundary regression in the built image (v5.1.1 under NNP/cap-drop; wrapper sudo-fails). Added the regression to run_container_integration.py. Host suite 387 ok. Closes #15. | 12 |
 | 2026-08-28 | Row 14: #25a expanded the promoted nuclei set from 1 to 15 curated detection-only KEV web CVE templates (2014-2024), each vetted through update-nuclei-templates' gate (dropped CVE-2017-9841 on the test's 'post ' prose guard). Manifest + pinning test updated. Local build: image verifier passes, 15 templates present, coverage line now reports 15/15 (>= meaningful floor, so #25b's 0-findings caution no longer fires). Full suite 387 ok. Closes #25. | 14 |
+| 2026-08-28 | Row 24 (#12): doctrine run. Decisions (Scott): #62 GHCR private, #63 OIDC+attestation, #64/#65 commit evidence to release-evidence/, #66 explicit macOS scope limitation. Landed the publish+attest+evidence pipeline (`container.yml` tag-gated `publish` job to GHCR private with digest + OIDC provenance + SBOM, `record-evidence` PR job; #65 CapEff evidence step; `docker-bake.hcl` output override), scope-limitation docs (README + container-build), and the 4->5 additions doc-match fix (integration prints, DEPLOYMENT_GUIDE, SETUP_DOCKER_MCP). Publish/attest ACs execute only on a release-tag CI run. | 24 -> WIP |

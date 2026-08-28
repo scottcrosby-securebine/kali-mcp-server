@@ -39,7 +39,7 @@ Test the exact command first:
   --dry-run
 ```
 
-Then remove `--dry-run` in the client configuration and restart the client. The client should discover 42 preserved calls plus four additions.
+Then remove `--dry-run` in the client configuration and restart the client. The client should discover 42 preserved calls plus five additions.
 
 Client configuration locations and schemas change independently of this repository. Consult the current official documentation for your MCP client. This project does not require or document a speculative Docker MCP Gateway registry format.
 
