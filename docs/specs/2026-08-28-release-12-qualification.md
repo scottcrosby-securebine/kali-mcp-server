@@ -11,8 +11,11 @@ resolves blockers #62, #63, #64, #65, #66. Issue-ref resolution:
   `ghcr.io/scottcrosby-securebine/kali-mcp-server`, private visibility, with an
   immutable digest. Pulls need auth.
 - **Signing (#63): "OIDC + attestation."** Grant `packages: write` +
-  `id-token: write`; publish keyless provenance and SBOM attestation via
-  buildx/build-push-action. Satisfies #12 AC5 (provenance) in full.
+  `id-token: write` (+ `attestations: write`); publish OIDC keyless provenance
+  via `actions/attest-build-provenance` and an SBOM attestation via
+  `build-push-action` `sbom: true`. The unsigned BuildKit provenance is left off
+  (`provenance: false`) so provenance is not double-attested. Satisfies #12 AC5
+  (provenance) in full.
 - **Evidence retention (#64 package-lock, #65 CapEff): "Commit to
   release-evidence/."** Per-release package and CapEff evidence lands durably in
   the git tree under `release-evidence/`, not only as an expiring CI artifact.

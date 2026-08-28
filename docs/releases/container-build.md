@@ -54,6 +54,15 @@ digest is evidence for a local qualification artifact, not a pullable registry
 manifest; a pullable manifest exists only after a release tag is pushed
 (Issue #12).
 
+GHCR package visibility is a one-time settings invariant, not a per-run check.
+A container package inherits its visibility from the owning repository on first
+publication, so the first push from this private repository creates a **private**
+package. The workflow does not assert visibility per run: there is no reliable
+read of a private user-owned package's visibility from the workflow
+`GITHUB_TOKEN`, and a check that fails closed on exactly the private packages it
+should pass is worse than none. If the package already exists, confirm once in
+the repository's package settings that its visibility is Private.
+
 The supported launcher mounts `/home/pentest` as a private writable tmpfs owned
 by UID/GID 1000 with mode `0700`. Release integration must retain the ownership,
 mode, and write test because several preserved tools initialize configuration

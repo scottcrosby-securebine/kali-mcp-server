@@ -184,6 +184,11 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v')
+    # One publish per tag. Without this a rerun or a concurrent push of the same
+    # tag races the evidence branch/PR; the loser fails rather than colliding.
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -191,6 +196,20 @@ jobs:
       id-token: write       # OIDC keyless attestation (#63)
       attestations: write   # required by actions/attest-build-provenance (#63)
     steps:
+      # Validate the tag BEFORE anything is pushed. The `if` only proves the ref
+      # starts with `v`; `v` and `vfoo` would otherwise publish an image that
+      # record-evidence then refuses (its guard is stricter), leaving a published
+      # image with no durable evidence. Both jobs share this exact grammar.
+      - name: Validate release tag
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+            echo "::error::Release tag '$REF_NAME' is not vMAJOR.MINOR.PATCH (optional -prerelease/+build). Refusing to publish."
+            exit 1
+          fi
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -223,22 +242,16 @@ jobs:
           subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
-      # #62: the package must be PRIVATE. First publication from a private repo
-      # is private by default, but that is not guaranteed if the package already
-      # existed public, so assert it rather than assume. Fails the release if the
-      # published package is not private.
-      - name: Assert GHCR package is private
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OWNER: ${{ github.repository_owner }}
-        run: |
-          set -euo pipefail
-          vis="$(gh api "/users/$OWNER/packages/container/kali-mcp-server" --jq .visibility)"
-          echo "GHCR package visibility: $vis"
-          if [ "$vis" != "private" ]; then
-            echo "::error::GHCR package kali-mcp-server is '$vis', expected 'private' (#62). Set the package visibility to private and re-release."
-            exit 1
-          fi
+      # #62: the package must be PRIVATE. GHCR sets a package's visibility from
+      # the OWNING REPO on first publication, so a first push from this private
+      # repo lands private; visibility is a package/repo setting, not something a
+      # push can assert. There is no reliable read of a PRIVATE user-package's
+      # visibility from GITHUB_TOKEN (the /users/{owner}/packages/... endpoint is
+      # documented for public metadata and 404s otherwise), so this is enforced
+      # as a one-time settings invariant, documented in docs/releases/
+      # container-build.md, not as a per-run API check that would fail closed on
+      # the very packages it is meant to pass.
+      #
       # #12 AC2 + #64 + #65: capture the DURABLE release evidence from the object
       # that actually shipped (the published digest), not the earlier smoke build.
       # Verify each published platform against the package lock, and record its
@@ -262,11 +275,19 @@ jobs:
             docker run --rm --platform "$platform" --entrypoint dpkg-query "$ref" \
               -W '-f=${Package}\t${Version}\t${Architecture}\n' > "$dest/${pname}-packages.tsv"
             # #65: CapEff of the shipped image under the launcher's hardened flags.
-            docker run --rm --platform "$platform" \
+            # awk exits 0 even when it matches no CapEff line, which would commit
+            # an empty file as capability evidence, so capture then assert the
+            # value: an empty effective set is exactly 16 hex zeros, and any other
+            # value (or none) fails the release.
+            capeff="$(docker run --rm --platform "$platform" \
               --security-opt=no-new-privileges --cap-drop=ALL --read-only \
-              --entrypoint awk "$ref" '/^CapEff:/ { print $2 }' /proc/self/status \
-              > "$dest/${pname}-capeff.txt"
-            echo "published $pname CapEff: $(cat "$dest/${pname}-capeff.txt")"
+              --entrypoint awk "$ref" '/^CapEff:/ { print $2 }' /proc/self/status)"
+            if [ "$capeff" != "0000000000000000" ]; then
+              echo "::error::published $pname CapEff is '$capeff', expected 0000000000000000 (empty capability set). Refusing to record evidence."
+              exit 1
+            fi
+            printf '%s\n' "$capeff" > "$dest/${pname}-capeff.txt"
+            echo "published $pname CapEff: $capeff"
           done
       - uses: actions/upload-artifact@v4
         with:
@@ -282,6 +303,9 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v')
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write        # push the evidence branch
@@ -294,6 +318,7 @@ jobs:
           name: release-evidence-published
           path: release-evidence
       - name: Open evidence PR
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REF_NAME: ${{ github.ref_name }}
@@ -301,11 +326,11 @@ jobs:
           set -euo pipefail
           # REF_NAME is attacker-influenceable, so it only reaches git/gh as an
           # argument, never interpolated into a script body, and is constrained
-          # to a release-tag shape first.
-          case "$REF_NAME" in
-            v[0-9]*) : ;;
-            *) echo "::error::record-evidence expects a v* release tag, got '$REF_NAME'"; exit 1 ;;
-          esac
+          # to the SAME grammar the publish job validated before pushing, so the
+          # two jobs never disagree about which tags are releasable.
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
+            echo "::error::record-evidence expects a vMAJOR.MINOR.PATCH tag, got '$REF_NAME'"; exit 1
+          fi
           dest="release-evidence/$REF_NAME"
           branch="release-evidence/$REF_NAME"
           git config user.name  "github-actions[bot]"
