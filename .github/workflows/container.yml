@@ -14,13 +14,105 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: python -m pip install playwright==1.62.0
       - run: python -m playwright install --with-deps chromium
       - name: Run report and browser acceptance tests
-        run: python -m unittest discover -s tests -v
+        # Not the default shell: that is `bash -e`, without pipefail, and the
+        # pipe below would then hide unittest's own exit status behind grep's.
+        shell: bash
+        run: |
+          # `unittest discover` exits 0 when it collects nothing, so a renamed
+          # or moved test path greens this job having run no test at all. The
+          # summary line must report at least one test. Not `grep -q`: it exits
+          # on the first match and SIGPIPEs the run it is measuring.
+          python -m unittest discover -s tests -v 2>&1 | tee /dev/stderr | grep -E '^Ran [1-9][0-9]* tests? in ' > /dev/null \
+            || { echo "::error::Acceptance suite failed, or collected zero tests (no 'Ran N tests' summary). Zero collected is a failure, not a pass."; exit 1; }
+
+      # Not collected by `unittest discover`, so it needs its own step or it
+      # only ever runs when someone remembers. Needs full history: it diffs the
+      # working tree against a base revision.
+      - name: Redaction differential gate
+        env:
+          # Through env, not inline `${{ github.event... }}` in the script body:
+          # event fields never become shell source text.
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -u
+          # Measure against what this change is actually built on. Pinning the
+          # script's default would compare against an ever-staler revision as
+          # main moves, which is the failure `--base` exists to prevent. A
+          # positional offset is no better: `HEAD~1` measures only the last
+          # commit of a branch, and on a shallow clone or a first commit it can
+          # resolve to HEAD itself -- the differential then compares a revision
+          # with itself, finds no regression by construction, and passes.
+          #
+          # The base per trigger, which is all three this workflow declares:
+          #   pull_request     the PR's base sha, so the whole branch is measured.
+          #   push             filtered to `branches: [main]`, so the merge-base
+          #                    is always HEAD and the only usable base is the
+          #                    pre-push tip. An all-zeros `before` (first push,
+          #                    or a force-push) names no such tip.
+          #   workflow_dispatch  no event range at all: the merge-base with the
+          #                    default branch, which on main is HEAD itself.
+          # The two shapes that name no distinct base -- an all-zeros push and a
+          # dispatch from the default branch -- are the environment saying there
+          # is nothing to measure, not a regression. They report that and pass.
+          # An UNEXPECTED unresolvable base still fails: a gate that cannot fail
+          # is the defect this step exists to close.
+          head="$(git rev-parse --verify HEAD^{commit})"
+          zero="0000000000000000000000000000000000000000"
+          case "${GITHUB_EVENT_NAME:-}" in
+            pull_request)
+              base="$PR_BASE_SHA"
+              ;;
+            push)
+              base="$PUSH_BEFORE_SHA"
+              if [ -z "$base" ] || [ "$base" = "$zero" ]; then
+                echo "::notice::Redaction differential gate: NOT MEASURED. This push reports no previous tip (before='$base'), which is a first push or a force-push, so there is no base revision to measure this working tree against."
+                exit 0
+              fi
+              ;;
+            *)
+              base="$(git merge-base origin/main HEAD 2>/dev/null || git merge-base main HEAD 2>/dev/null || true)"
+              if [ -n "$base" ] && [ "$base" = "$head" ]; then
+                echo "::notice::Redaction differential gate: NOT MEASURED. ${GITHUB_EVENT_NAME:-this event} carries no changed range, and HEAD is already on the default branch, so the merge-base is HEAD itself and there is nothing to measure against."
+                exit 0
+              fi
+              ;;
+          esac
+          resolved="$(git rev-parse --verify --quiet "${base}^{commit}" || true)"
+          if [ -z "$resolved" ] || [ "$resolved" = "$head" ]; then
+            echo "::error::Redaction differential gate: base '$base' is empty, is not a commit, or equals HEAD ($head). A base equal to HEAD makes the differential unable to fail, so this is an environment failure, not a pass. Check that the checkout has full history (fetch-depth: 0) and that origin/main was fetched." >&2
+            exit 1
+          fi
+          echo "redaction differential: base=$resolved head=$head"
+          # 0 measured and clean, 1 a redaction regression, 3 the base carries
+          # an identical kali_pentest_server.py so there was nothing to measure
+          # (every docs-only, tests-only or workflow-only change). Anything else
+          # -- 2 included -- is a failure.
+          #
+          # 3 and not 2 because 2 is not a status only this script can produce:
+          # CPython exits 2 when it cannot open the script file, and argparse
+          # exits 2 on any usage error. Treating 2 as "nothing to measure"
+          # greens this gate on a deleted or renamed differential, and prints a
+          # notice asserting a reason that is false. Nothing produces 3 but the
+          # script saying so itself.
+          #
+          # 3 passes, but never silently: a green log that does not say the gate
+          # measured nothing is the same silent pass as a vacuous base.
+          status=0
+          python3 tests/redaction_differential.py --base "$resolved" || status=$?
+          if [ "$status" = "3" ]; then
+            echo "::notice::Redaction differential gate: NOT MEASURED. Base $resolved carries the same kali_pentest_server.py as the working tree, so this change alters no redaction behaviour and the differential had nothing to compare."
+            exit 0
+          fi
+          exit "$status"
 
   build-and-smoke:
     timeout-minutes: 60

@@ -213,14 +213,21 @@ class LegacyToolContractTests(unittest.TestCase):
                 ],
             ),
             (
+                # #43: web_audit resolves the scheme once, port-implied, and
+                # hands it to every child. A bare host with no port is https,
+                # not the old blind http:// -- and the same across all stages,
+                # where it used to defeat web_headers' own resolution.
                 "web_audit",
                 "example.test",
                 [
-                    ("whatweb_scan", ("http://example.test", "3")),
-                    ("wafw00f_scan", ("http://example.test",)),
-                    ("web_headers", ("http://example.test",)),
-                    ("nikto_scan", ("http://example.test",)),
-                    ("nuclei_scan", ("http://example.test",)),
+                    ("whatweb_scan", ("https://example.test", "3")),
+                    ("wafw00f_scan", ("https://example.test",)),
+                    ("web_headers", ("https://example.test",)),
+                    ("nikto_scan", ("https://example.test",)),
+                    ("nuclei_scan", ("https://example.test",)),
+                    # Newly reached: a bare host is https now, so the TLS stage
+                    # runs where the old blind http:// skipped it.
+                    ("sslscan_scan", ("example.test",)),
                 ],
             ),
             (
@@ -251,7 +258,10 @@ class LegacyToolContractTests(unittest.TestCase):
             # below, so any path is accepted.
             "hydra_attack": ("192.0.2.1", "ssh", "tester", "/workspace/wordlist.txt"),
             "john_crack": ("/workspace/hashes.txt",),
-            "hashcat_crack": ("/workspace/hashes.txt",),
+            # wordlist is now required (#56): an empty list used to default to
+            # rockyou and a missing path silently swapped to dirb. isfile is
+            # patched True below, so any path is accepted.
+            "hashcat_crack": ("/workspace/hashes.txt", "0", "/workspace/wordlist.txt"),
             "metasploit_search": ("CVE-2021-44228",),
             "metasploit_info": ("exploit/test/module",),
         }

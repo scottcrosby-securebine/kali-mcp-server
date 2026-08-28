@@ -21,6 +21,29 @@ python3 kali_pentest_server.py          # host: needs `pip install -r requiremen
 # Run the native contract, adapter, report, launcher, registry, and browser tests
 python3 -m unittest discover -s tests -v
 
+# Redaction gate. NOT collected by unittest discover -- run it directly, and read
+# the EXIT STATUS, not the last line of output (a launcher test prints a docker
+# line after `OK`). Three states: 0 measured and clean; 3 NOTHING TO MEASURE,
+# the base carries a byte-identical kali_pentest_server.py so the run is a pass
+# that proves nothing; any other status a failure. 1 is the real verdict -- a
+# leak opened, legitimate content destroyed, a parser the corpus never
+# exercised, or a sweep combination the base redacted and HEAD does not. 2 is
+# not a verdict at all: CPython exits 2 on a script it cannot open and argparse
+# exits 2 on a bad flag, which is why "nothing to measure" is 3 and 2 fails.
+# Pass --base after this branch merges.
+python3 tests/redaction_differential.py [--base <rev>] [--json out.json]
+
+# Mutation check: swap kali_pentest_server.py for the version at <base-rev>, run
+# the tests matching <test-pattern> (default `test_scanner_adapters.py`) against
+# it, and require a real ASSERTION failure -- 0 the mutation was caught, 1 the
+# suite ran clean so those assertions pin nothing, 2 INCONCLUSIVE (nothing
+# collected, or an error, neither of which proves anything either way), 3 the
+# base is byte-identical to the working tree so nothing was mutated. Same 3 as
+# the redaction gate above, and for the same reason: a run that measured nothing
+# must not report either a pass or an accusation. Refuses to start while
+# kali_pentest_server.py has uncommitted changes. Restores the tree on any exit.
+scripts/mutation-check <base-rev> [test-pattern]
+
 # Verify a built image under the required NNP boundary
 docker run --rm --security-opt=no-new-privileges \
   --entrypoint verify-kali-mcp-image kali-mcp-server:latest
@@ -34,6 +57,8 @@ scripts/update-nuclei-templates --source /path/to/upstream \
   --destination /new/staging/directory --version UPSTREAM_VERSION \
   http/cves/example.yaml
 ```
+
+`scripts/mutation-check` clears `__pycache__` around every swap, and anything else that swaps the source must too: a restore rewriting the same byte count inside one second reproduces the source mtime, so Python keeps running the MUTATED bytecode while the source reads clean.
 
 Container CI builds `linux/amd64` and `linux/arm64`, runs the image verifier, and exercises the hermetic MCP/container integration seam. QEMU arm64 CI is not physical Apple Silicon qualification; do not publish a claim that Docker Desktop qualification is complete until real Darwin/arm64 evidence exists. `python3 kali_pentest_server.py` on the host needs the Python dependencies plus the Kali binaries on `PATH`; the container is the reliable environment.
 

@@ -3,6 +3,7 @@ import inspect
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -1303,6 +1304,75 @@ class RawTextCaptureTests(unittest.TestCase):
         ("orphaned key then a complete one",
          "-----BEGIN RSA PRIVATE KEY-----\nKEYLEAK\nfiller\n"
          "-----BEGIN RSA PRIVATE KEY-----\nB\n-----END RSA PRIVATE KEY-----", "KEYLEAK"),
+        # --- #27. Every row below leaked on main. ---
+        # H1: the closer was searched for anywhere in the region, so an
+        # unrelated `@` on a later line vouched for the orphan above it. A
+        # whois record carries an abuse address in nearly every case.
+        ("orphan vouched for by a later unrelated @",
+         "https://svc:PWLEAK\nRegistrar Abuse Contact Email: abuse@registrar.tld", "PWLEAK"),
+        # H2: a keyword line ate the secret's OPENER, and the pattern that
+        # would have caught the body needs an `-----END-----` a hostile server
+        # simply omits. All four shapes the keyword pattern can swallow.
+        ("keyword line eats an unpaired key opener",
+         "password: -----BEGIN PRIVATE KEY-----\nMIIEvKEYLEAK", "MIIEvKEYLEAK"),
+        ("keyword line eats a lowercase unpaired key opener",
+         "secret=-----begin private key-----\nMIIEvKEYLEAK", "MIIEvKEYLEAK"),
+        ("keyword line eats a split JWT opener",
+         "authorization: eyJhbGciOiJIUzI1NiJ9.\neyJzdWIiPAYLOADLEAK", "PAYLOADLEAK"),
+        ("keyword line eats a split URL credential opener",
+         "token: https://svc:\nPWLEAK", "PWLEAK"),
+        # X1: opener TYPES were tried in a fixed order with a return on the
+        # first orphan, so a trailing bare key header made the guard cut THERE
+        # and leave an orphaned JWT earlier in the value intact.
+        ("a later key orphan must not preempt an earlier JWT orphan",
+         "eyJhbGciOiJIUzI1NiJ9.PAYLOADLEAK -----BEGIN PRIVATE KEY-----", "PAYLOADLEAK"),
+        # X2: the port tail was never range checked, so an all-numeric
+        # password passed itself off as a port.
+        ("an out-of-range numeric password is not a port", "https://svc:98765", "98765"),
+        # C1/C2, both introduced by the first attempt at this fix and caught by
+        # review, not by the suite. A keyword value that is an ordinary URL must
+        # still be redacted whole -- stopping the value at any bare `scheme://`
+        # left it in the clear -- and a bracket inside the userinfo must not let
+        # a credential escape the pattern that exists to catch it.
+        ("a keyword whose value is a plain URL",
+         "password: http://svc.example/cb?k=SECRETVAL1", "SECRETVAL1"),
+        ("a keyword whose value is a vault URL",
+         "api_key: https://vault.example/s/SECRETVAL2", "SECRETVAL2"),
+        ("a credential with a bracket in the userinfo",
+         "https://us[er:PASSWORD1@host.example/x", "PASSWORD1"),
+        ("a credential with a close bracket in the userinfo",
+         "https://us]er:PASSWORD2@host.example/x", "PASSWORD2"),
+        # A keyword has ALREADY said the value is a secret, so a numeric value
+        # that merely looks like a port must not win over that.
+        ("a keyword whose value is a port-shaped credential",
+         "password: https://svc:12345", "12345"),
+        ("a keyword whose port-shaped credential has a path",
+         "token: https://svc:12345/path", "12345"),
+        # An empty username is a real credential shape and used to pass every
+        # matcher, because the userinfo was required to have a first character.
+        ("a credential with an empty username",
+         "prefix https://:PASSWORD1@db.internal/x suffix", "PASSWORD1"),
+        # The orphan branch kept `scheme://user:` while the complete branch
+        # already dropped the userinfo, so the username leaked out of one path.
+        ("an orphaned credential does not disclose its username",
+         "prefix https://dbadmin:hunter2", "dbadmin"),
+        # D3. A URL parser removes tab, CR and LF before parsing, so each of
+        # these is the single credential `user:PASSWORD` and stopping the cut at
+        # the whitespace left the tail of the password in the report.
+        ("a credential spanning a newline", "https://user:PASS\nWORDLEAKA@host/x", "WORDLEAKA"),
+        ("a credential spanning a tab", "https://user:PASS\tWORDLEAKB@host/x", "WORDLEAKB"),
+        ("a credential spanning a carriage return", "https://user:PASS\rWORDLEAKC@host/x", "WORDLEAKC"),
+        # Every D3 row above carries a trailing `@host/x`, so all three pinned
+        # only the branch where the closer is still reachable -- and the guard
+        # exists for the case where it is NOT. With the `@` truncated away the
+        # narrow whitespace run still applied and the tail leaked, on head but
+        # not on base (#27 G1). The run-to-space is unconditional now.
+        ("a newline-split credential with no trailing @",
+         "https://user:PASS\nWORDLEAKD Name Server: NS1", "WORDLEAKD"),
+        ("a tab-split credential with no trailing @",
+         "https://user:PASS\tWORDLEAKE Name Server: NS1", "WORDLEAKE"),
+        ("a CR-split credential with no trailing @",
+         "https://user:PASS\rWORDLEAKF Name Server: NS1", "WORDLEAKF"),
     )
     REDACTION_MUST_KEEP = (
         ("a plain whois record",
@@ -1318,7 +1388,145 @@ class RawTextCaptureTests(unittest.TestCase):
         ("an msfconsole module list",
          "  exploit/windows/smb/ms17_010_eternalblue  2017-03-14  average\n", "ms17_010_eternalblue"),
         ("a URL with an empty port", "See https://example.com:/path and more", "and more"),
+        # --- #27. Every row below was DESTROYED on main. ---
+        # H3: the port tail accepted only `/ ? #` or end-of-string, so a
+        # legitimate ported URL before any other character was read as an
+        # orphan and everything from the URL onward was cut. One row per
+        # terminator the pattern accepts, written out rather than generated:
+        # the generated form drifted from the pattern immediately, leaving `}`
+        # and the tab accepted by the code and pinned by nothing.
+        ("a ported URL then a slash", "see https://host:8443/x then check log", "then check log"),
+        ("a ported URL then a query", "see https://host:8443?a=1 then check log", "then check log"),
+        ("a ported URL then a fragment", "see https://host:8443#top then check log", "then check log"),
+        ("a ported URL then a double quote", 'see https://host:8443" then check log', "then check log"),
+        ("a ported URL then a single quote", "see https://host:8443' then check log", "then check log"),
+        ("a ported URL then a comma", "see https://host:8443, then check log", "then check log"),
+        ("a ported URL then a semicolon", "see https://host:8443; then check log", "then check log"),
+        ("a ported URL then a paren", "see https://host:8443) then check log", "then check log"),
+        ("a ported URL then a bracket", "see https://host:8443] then check log", "then check log"),
+        ("a ported URL then a brace", "see https://host:8443} then check log", "then check log"),
+        ("a ported URL then a space", "see https://host:8443 then check log", "then check log"),
+        ("a ported URL then a tab", "see https://host:8443\tthen check log", "then check log"),
+        ("a ported URL then a serialized newline",
+         "see https://host:8443\\n then check log", "then check log"),
+        ("a ported URL then a real newline", "see https://host:8443\n then check log", "then check log"),
+        ("an IPv6 URL with a port", "https://[2001:db8::1]:8443/status", "db8::1]:8443"),
+        # H4/X3: redaction kept the secret's own opener as the `\\1` of
+        # `\\1[REDACTED]`, the guard rematched it, found no closer, and
+        # truncated the rest of the field. All three anchored patterns.
+        ("content after a complete uppercase key",
+         "-----BEGIN PRIVATE KEY-----\nAAA\n-----END PRIVATE KEY-----\nName Server: NS1", "NS1"),
+        ("content after a complete lowercase key",
+         "-----begin private key-----\nAAA\n-----end private key-----\nName Server: NS1", "NS1"),
+        ("content after a complete URL credential",
+         "https://dbadmin:hunter2@db.internal/x and more", "db.internal"),
+        # H6: a JWT's own payload segment is itself a valid JWT opener, so a
+        # well-formed three-segment token was judged an orphan.
+        ("content after a complete JWT",
+         "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhIn0.SIGSIG Name Server: NS1", "NS1"),
+        # D2/D3. An orphan is cut only to the end of its own run, not to the end
+        # of the value. For a URL that run ends at a SPACE, not at any
+        # whitespace, and only where no `@` is still reachable: a URL parser
+        # strips tab, CR and LF before parsing, so a credential can span one.
+        # There is deliberately NO row here for an abuse address on the line
+        # BELOW an orphaned credential. It cannot survive, because under that
+        # parser it may itself be part of the credential.
+        ("text after a credential-shaped phrase",
+         "ws://gateway:live contact ops@example.com", "contact ops@example.com"),
+        ("text after an orphaned JWT",
+         "eyJhbGciOiJIUzI1NiJ9.PAYLOADLEAK Name Server: NS1", "NS1"),
+        ("text after a credential with an empty username",
+         "prefix https://:PASSWORD1@db.internal/x suffix", "suffix"),
+        # The paired half of the three G1 rows above, on the SAME strings: the
+        # run-to-space must be unconditional AND must still stop at the space,
+        # or the fix for the leak is just the end-of-value cut D2 removed.
+        ("text after a newline-split credential",
+         "https://user:PASS\nWORDLEAKD Name Server: NS1", "Name Server: NS1"),
+        ("text after a tab-split credential",
+         "https://user:PASS\tWORDLEAKE Name Server: NS1", "Name Server: NS1"),
+        ("text after a CR-split credential",
+         "https://user:PASS\rWORDLEAKF Name Server: NS1", "Name Server: NS1"),
     )
+
+    def test_clip_never_exceeds_its_cap(self):
+        """`_clip`'s one invariant: the result never exceeds `limit`. It has now
+        broken three separate ways -- #27 H5 (the guard APPENDS its placeholder,
+        so an opener landing near the boundary overshot; BOTH kept openers do it,
+        and an earlier version of this test exercised only JWT pads), #27 R3 (a
+        limit shorter than the placeholder made the slice negative and GREW the
+        result), and #27 RT-B1 (R3's re-guard appends a placeholder of its own
+        and the caller appended a second one). Each fix was scoped to the shape
+        that had just broken, so this sweeps the space instead of that shape:
+        both openers, limits -10 to 139 against 40 pad offsets, and a two-opener body
+        that forces the re-guard to fire -- which is what RT-B1 needed and the
+        single-opener rows above cannot produce."""
+        cap = self.server.MAX_EVIDENCE_CHARS
+        for opener in ("eyJabcdefgh.", "https://svc:"):
+            # One opener, and TWO split by a space so the guard cuts twice.
+            for name, tail in (("one-opener", "B" * 500),
+                               ("two-opener", "B" + " " + opener + "C" * 500)):
+                for offset in range(0, 40):
+                    with self.subTest(opener=opener, tail=name, cap_offset=offset):
+                        value = "A" * (cap - offset) + opener + tail
+                        self.assertLessEqual(len(self.server._clip(value, cap)), cap)
+                # Negative limits included: the invariant is max(limit, 0), and
+                # dropping `limit = max(limit, 0)` from `_clip` only shows up here.
+                for limit in range(-10, 140):
+                    for offset in range(0, 40):
+                        with self.subTest(opener=opener, tail=name, limit=limit, offset=offset):
+                            value = "A" * max(0, limit - offset) + opener + tail
+                            self.assertLessEqual(len(self.server._clip(value, limit)), max(limit, 0))
+
+    def test_clip_reguard_keeps_the_redaction_marker_whole(self):
+        """`_clip`'s re-guard branch, pinned. Deleting the whole
+        `if len(clipped) > limit:` block left the suite green, because the cap
+        invariant above is satisfied by the final `clipped[:limit]` on its own.
+        What the branch actually buys is that the cut it has to make lands
+        BEFORE the placeholder rather than through it: without it the output
+        ends in `[REDA`, or in the bare opener with the marker sliced off
+        entirely, and a redacted cut reads as the tool having stopped there.
+        The re-redaction of the second slice is the other half and cannot be
+        seen from outside, so this pins the half that shows."""
+        for opener in ("eyJabcdefgh.", "https://svc:"):
+            for limit in (30, 60, 120, self.server.MAX_EVIDENCE_CHARS):
+                with self.subTest(opener=opener, limit=limit):
+                    value = "A" * (limit - len(opener) - 1) + opener + "P" + "B" * 500
+                    # The branch only fires when the guard's placeholder overshoots.
+                    self.assertGreater(
+                        len(self.server._redact_truncated_secret(value[:limit])), limit)
+                    clipped = self.server._clip(value, limit)
+                    self.assertTrue(clipped.endswith("[REDACTED]"), clipped[-20:])
+                    self.assertEqual(limit, len(clipped))
+
+    def test_paired_table_covers_every_terminator_the_pattern_accepts(self):
+        """The terminator set was spelled three times and drifted three times:
+        `}` and the tab ended up accepted by `URL_PORT_TAIL` and pinned by
+        nothing. Hand-syncing copies is what failed, so this asserts the
+        coverage instead -- add a terminator to the pattern and this fails until
+        a row pins it.
+
+        What pins the STRICT set today is the derivation
+        `PORT_TERMINATORS = PORT_TERMINATORS_STRICT + ...`: while that holds,
+        strict is a subset of wide and the strict loop below cannot fail on its
+        own. The loop is here for the day someone un-derives them and spells
+        strict separately again -- the fifth recurrence of this drift -- so that
+        it fails instead of silently reopening it.
+
+        A missing name must FAIL, not error and not pass. `getattr(..., "")`
+        was the fifth recurrence's hiding place: renaming the set left the loop
+        iterating an empty string and the suite green. An older revision that
+        carries neither name is what the mutation gate replays against, and it
+        accepts an assertion failure but rejects an AttributeError, so absence
+        is asserted rather than raised."""
+        pinned = "".join(text[len("see https://host:8443")] for _, text, _ in self.REDACTION_MUST_KEEP
+                         if text.startswith("see https://host:8443"))
+        for name in ("PORT_TERMINATORS", "PORT_TERMINATORS_STRICT"):
+            terminators = getattr(self.server, name, None)
+            self.assertIsNotNone(terminators, f"{name} must keep this name: the paired table iterates it")
+            for terminator in terminators or "":
+                with self.subTest(terminator_set=name, terminator=terminator):
+                    self.assertIn(terminator, pinned)
+        self.assertTrue({" ", "\t"} <= set(pinned), "whitespace terminators must be pinned too")
 
     def test_redaction_removes_secrets_and_keeps_everything_else(self):
         parse = self.server._raw_text_parser("whois", "example.com")
@@ -1466,6 +1674,39 @@ class RawTextCaptureTests(unittest.TestCase):
         rendered = self.server._render_report(document)
         self.assertIn("Registrar: Example Inc", rendered)
 
+
+class RedactionDifferentialExitCodeTests(unittest.TestCase):
+    """`tests/redaction_differential.py` is a gate whose exit status IS its
+    verdict, and the CI step maps each code to a different outcome. Nothing
+    asserted what it returns, which is how "nothing to measure" shipped as 2 --
+    a code CPython also returns when it cannot open the script file and argparse
+    returns on any usage error, so the step passed with a false notice on a
+    renamed gate path and on a renamed flag."""
+
+    SCRIPT = Path(__file__).resolve().parent / "redaction_differential.py"
+
+    def _status(self, *args):
+        return subprocess.run([sys.executable, str(self.SCRIPT), *args],
+                              cwd=self.SCRIPT.parent.parent,
+                              capture_output=True, text=True).returncode
+
+    def test_a_base_carrying_the_working_tree_file_exits_3(self):
+        # A base byte-identical to the working tree, built without committing:
+        # a blob of the current file and a dangling tree holding it. `git show
+        # <tree>:<path>` reads that, which is all the script does with --base.
+        repo = self.SCRIPT.parent.parent
+        def git(*args, stdin=None):
+            return subprocess.run(["git", *args], cwd=repo, input=stdin, check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        blob = git("hash-object", "-w", "kali_pentest_server.py")
+        tree = git("mktree", stdin=f"100644 blob {blob}\tkali_pentest_server.py\n")
+        self.assertEqual(3, self._status("--base", tree))
+
+    def test_usage_and_environment_errors_are_not_confusable_with_that(self):
+        # Both are argparse's 2. The point is only that neither is 3, or the CI
+        # step would report "nothing to measure" for a gate that never ran.
+        self.assertEqual(2, self._status("--bogus-arg"))
+        self.assertEqual(2, self._status("--base", "nosuchrev"))
 
 
 if __name__ == "__main__":

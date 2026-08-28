@@ -471,10 +471,14 @@ def main() -> int:
                 rm /home/pentest/.runtime-write-test
                 test -w /results && test -w /reports
                 test ! -w /workspace && test ! -w /artifacts
+                /usr/lib/amass/amass -version >/dev/null
+                ! /usr/bin/amass -version >/dev/null 2>&1
+                grep -q '/usr/lib/amass/amass' /app/kali_pentest_server.py
             """]),
             capture_output=True,
         )
         print("PASS runtime: non-root, private writable home, NNP, cap-drop, read-only mounts, no non-loopback routes")
+        print("PASS amass_enum reaches the hardened binary directly, bypassing the sudo wrapper (#15)")
 
         client = McpClient(base)
         stack.callback(client.close)
