@@ -73,9 +73,22 @@ class ControlByteStripTests(unittest.TestCase):
                 payload = f"authorization: Bea{sep}rer SECRETLEAK123"
                 out = self.server._redact_scanner_data(payload)
                 self.assertNotIn("SECRETLEAK123", out, f"{name} split leaked")
-        # a keyword itself split (pass<NBSP>word) still redacts its value
+        # a keyword split by an INVISIBLE (zero-width) char still reassembles and
+        # redacts. (A keyword split by NBSP renders as a visible space -> that is the
+        # out-of-scope visible-split class; NBSP is folded to a space, not deleted.)
         self.assertNotIn("SECRETLEAK123",
-                         self.server._redact_scanner_data("pass\u00a0word: SECRETLEAK123"))
+                         self.server._redact_scanner_data("pass\u200bword: SECRETLEAK123"))
+
+    def test_whitespace_separator_folded_not_deleted(self):
+        # red-team B1: a keyword/value separator that is NBSP/NEL/a C0-C1 control /
+        # a unicode space must be FOLDED to a space, not deleted -- deleting it fused
+        # 'Bearer<sep>token' so bearer\\s+ matched nothing and the token leaked.
+        for sep in ("\u00a0", "\x85", "\x1c", "\u2028", "\u202f", "\x0b"):
+            with self.subTest(sep=hex(ord(sep))):
+                out = self.server._redact_scanner_data(f"Bearer{sep}AKIALEAK123")
+                self.assertNotIn("AKIALEAK123", out, f"sep U+{ord(sep):04X} leaked")
+        self.assertNotIn("YWxhZGRpbjpvcGVu",
+                         self.server._redact_scanner_data("Basic\u00a0YWxhZGRpbjpvcGVu"))
 
     def test_report_escape_strips_control_bytes(self):
         escaped = self.server._escape_report_data("x\x1b[31my\x07z")
