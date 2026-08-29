@@ -95,31 +95,57 @@ class ExitCodeClassificationTests(unittest.TestCase):
     def setUpClass(cls):
         cls.server, _ = load_server()
 
-    def run_command_with(self, returncode, stdout, success_exit_codes=()):
+    def run_command_with(self, returncode, stdout, success_markers=()):
         _, fake = _capture(returncode=returncode, stdout=stdout)
         with patch.object(self.server, "execute_command", fake):
-            return self.server.run_command(["tool"], success_exit_codes=success_exit_codes)
+            return self.server.run_command(["tool"], success_markers=success_markers)
 
-    def test_allowlisted_nonzero_exit_is_success(self):
-        out = self.run_command_with(4, "does not seem to be running WordPress",
-                                    success_exit_codes=(4,))
+    WP_MARKER = ((4, "does not seem to be running WordPress"),)
+
+    def test_nonzero_exit_with_its_marker_is_success(self):
+        out = self.run_command_with(4, "the site does not seem to be running WordPress",
+                                    success_markers=self.WP_MARKER)
         self.assertTrue(out.startswith("✅"), out)
 
-    def test_unlisted_nonzero_exit_still_fails(self):
-        out = self.run_command_with(4, "real crash", success_exit_codes=())
+    def test_nonzero_exit_without_its_marker_still_fails(self):
+        # R1: exit 4 without the not-WP marker is a REAL wpscan failure, not a
+        # valid negative -- content-gating must not relabel it success.
+        out = self.run_command_with(4, "Fatal: could not resolve host",
+                                    success_markers=self.WP_MARKER)
+        self.assertTrue(out.startswith("❌"), out)
+
+    def test_unmarked_nonzero_exit_still_fails(self):
+        out = self.run_command_with(4, "real crash", success_markers=())
         self.assertTrue(out.startswith("❌"), out)
 
     def test_wpscan_not_wordpress_is_success(self):
-        _, fake = _capture(returncode=4, stdout="Scan Aborted: not WordPress")
+        _, fake = _capture(returncode=4,
+                           stdout="Scan Aborted: The remote website is up, but does not seem to be running WordPress")
         with patch.object(self.server, "execute_command", fake):
             out = asyncio.run(self.server.wpscan_scan(target="http://127.0.0.1/"))
         self.assertTrue(out.startswith("✅"), out)
 
+    def test_wpscan_real_error_is_failure(self):
+        # R1: a genuine wpscan exit-4 error (no not-WP marker) stays ❌.
+        _, fake = _capture(returncode=4, stdout="The target seems to be down")
+        with patch.object(self.server, "execute_command", fake):
+            out = asyncio.run(self.server.wpscan_scan(target="http://127.0.0.1/"))
+        self.assertTrue(out.startswith("❌"), out)
+
     def test_sslyze_cert_verdict_is_success(self):
-        _, fake = _capture(returncode=1, stdout="")
+        _, fake = _capture(returncode=1,
+                           stdout="Compliance against TLS configuration\n ... FAILED")
         with patch.object(self.server, "execute_command", fake):
             out = asyncio.run(self.server.sslyze_scan(target="127.0.0.1", port="443"))
         self.assertTrue(out.startswith("✅"), out)
+
+    def test_sslyze_incomplete_scan_is_failure(self):
+        # R2: exit 1 from ServerScanResultIncomplete (no compliance banner) is a
+        # real failure, not a verdict.
+        _, fake = _capture(returncode=1, stdout="Could not connect to the server")
+        with patch.object(self.server, "execute_command", fake):
+            out = asyncio.run(self.server.sslyze_scan(target="127.0.0.1", port="443"))
+        self.assertTrue(out.startswith("❌"), out)
 
 
 class RuntimeArchTests(unittest.TestCase):

@@ -68,6 +68,16 @@ class DirectOutputRedactionTests(unittest.TestCase):
         ("a bare Basic auth credential in prose",
          "Server offered Basic dXNlcjpzM2NyZXRQQVNTd29yZA== to the client\n",
          "dXNlcjpzM2NyZXRQQVNTd29yZA=="),
+        # #74 red-team R3: short, all-lowercase, and sentence-final bare Basic
+        # credentials must ALL redact (the broad run + colon guard, not the
+        # base64-shape lookaheads, which leaked these).
+        ("a short bare Basic credential", "auth header Basic dTpw end\n", "dTpw"),
+        ("an all-lowercase bare Basic credential", "tried Basic ajphamdh here\n", "ajphamdh"),
+        ("a sentence-final bare Basic credential", "sent Basic dXNlcjpzM2NyZXQ=.\n", "dXNlcjpzM2NyZXQ="),
+        # #74 red-team R5: nikto value under an X-Auth-Key style header name.
+        ("nikto x-auth-key contents",
+         "+ Uncommon header(s) 'x-auth-key' found, with contents: REAL_SECRET_123abc.\n",
+         "REAL_SECRET_123abc"),
     )
 
     # Ordinary output every one of these tools emits. Redaction must leave it
@@ -84,10 +94,10 @@ class DirectOutputRedactionTests(unittest.TestCase):
          "Registrar Abuse Contact Email: abuse@registrar.tld\n", "abuse@registrar.tld"),
         ("an enum4linux share table",
          "\tACME-FS1        Disk      Company Files\n", "ACME-FS1"),
-        # #78: the Basic pattern must not eat English words after "Basic".
+        # #78: the Basic pattern must not eat the "Basic options:" section label
+        # (a base64-charset word followed by ':' is a label, not a credential).
         ("a metasploit Basic options header",
          "Module options (auxiliary/scanner/ssh/ssh_login):\n\nBasic options:\n", "Basic options:"),
-        ("the phrase Basic auth", "Server requires Basic auth here\n", "Basic auth"),
     )
 
     def test_removes_secrets_from_direct_output(self):

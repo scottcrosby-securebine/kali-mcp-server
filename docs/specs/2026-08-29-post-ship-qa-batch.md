@@ -32,10 +32,14 @@ issue bodies; the Spec reviewer resolves `#N` via the issue tracker.
 
 - **F2 — #78 (redaction over-match).** The HTTP-Basic-auth pattern
   `(basic\s+)[A-Za-z0-9+/=]+` matches Metasploit's `Basic options:` →
-  `Basic [REDACTED]:`. **AC:** `Basic options:` survives verbatim; real
-  `Authorization: Basic <b64>` credentials still redact. **Seam:** redaction unit
-  test asserting `Basic options:` survives and a real Basic token still redacts.
-  Same function as F1 — one agent, done together; they pull opposite directions.
+  `Basic [REDACTED]:`. **AC:** `Basic options:` survives verbatim; real bare
+  `Basic <b64>` credentials still redact (including short, all-lowercase, and
+  sentence-final ones — red-team R3). **Approach:** keep the broad base64 run,
+  add a negative lookahead so a run immediately followed by `:` (a label) is not
+  matched. A base64-shaped English word followed by `;`/EOL stays redacted (the
+  original pattern's pre-existing behavior, out of #78's colon-label scope).
+  **Seam:** redaction table — `Basic options:` survives; short/lowercase/final
+  bare Basic creds redact. Same function as F1 — one agent, together.
 
 - **F3 — #75 (theHarvester google engine).** Wrapper defaults/remaps to `google`,
   which theHarvester 4.11.1 dropped → exit 1 before any work; `source` arg not
@@ -53,13 +57,20 @@ issue bodies; the Spec reviewer resolves `#N` via the issue tracker.
 - **F5 — #77 (valid-negative exits mislabeled).** `run_command` /
   `_run_with_capture` map any nonzero exit to `❌ Scan failed`; wpscan exit 4
   (not-WordPress) and sslyze exit 1 (cert/policy verdict) are valid negatives.
-  **AC:** per-tool known-nonzero exit codes classify as success (wpscan 4, sslyze
-  1); genuine failures still `❌`; no regression to legacy callers passing nothing.
-  **Seam:** adapter test — a wpscan exit-4 result is not prefixed `❌ Scan failed`;
-  an arbitrary nonzero from a tool with no allowlist still `❌`.
+  **AC:** these classify as success WITHOUT masking real failures; genuine
+  failures still `❌`; no regression to legacy callers passing nothing.
+  **Approach (revised after red-team R1/R2):** a bare exit-code allowlist is
+  wrong — wpscan 4 is any "scan did not finish" and sslyze 1 is a verdict OR
+  `ServerScanResultIncomplete` (both confirmed from upstream source). So a caller
+  passes `success_markers` = (exit_code, required_substring) pairs; the nonzero
+  exit is success only when the marker proving a real result is present — wpscan
+  `"does not seem to be running WordPress"`, sslyze `"Compliance against TLS
+  configuration"`. **Seam:** adapter test — exit-4-with-marker → ✅, exit-4
+  without-marker → ❌; exit-1-with-banner → ✅, incomplete (no banner) → ❌;
+  unmarked nonzero still ❌.
 
 - **F6 — #13 (startup arch log).** Startup emits no runtime-arch line; two
-  docstrings (hashcat 3338, metasploit_info 3393) still say "ARM64". **AC:** report
+  docstrings (hashcat, metasploit_search) still say "ARM64". **AC:** report
   architecture without hard-coding Apple Silicon (or omit the claim); do not
   present QEMU arm64 as physical macOS qualification; stdio MCP behavior and the
   42+5 contract preserved; a focused test if a message remains. **Seam:** test the
