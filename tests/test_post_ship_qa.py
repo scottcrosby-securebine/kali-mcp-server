@@ -234,6 +234,37 @@ class CombinedTrailerTests(unittest.TestCase):
         self.assertTrue(self._trailer(out).startswith("✅"), out)
 
 
+class UrlCredentialKeywordPasswordTests(unittest.TestCase):
+    """#98 red-team L1: a URL credential whose password carries a secret keyword
+    bridged to a `:`/`=` must still redact the WHOLE authority. If the keyword arm
+    runs before URL_CREDENTIAL, its value arm eats past the `@`, destroying the
+    terminator and leaking scheme+userinfo. URL_CREDENTIAL must run first."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    LEAKY_URLS = (
+        "http://admin:topsecretKey=aQ@db.internal/prod",
+        "postgres://user:sessionBlob=xY9@h/db",
+        "http://svc:mytokenValue=1@api.host",
+        "http://:topsecretKey=zz@host",
+        "http://admin:passwordHash:9f@db",
+        "https://svc:cookieJar=abc@host/x",
+    )
+
+    def test_userinfo_never_survives(self):
+        red = self.server._redact_scanner_data
+        for url in self.LEAKY_URLS:
+            with self.subTest(url=url):
+                out = red(url)
+                # the authority (everything scheme://...@) must be gone: no '@' left,
+                # and the username must not survive in the clear
+                self.assertNotIn("@", out, out)
+                for token in ("admin", "user", "svc"):
+                    self.assertNotIn(token, out.replace("[REDACTED]", ""), out)
+
+
 class CompoundKeyRedactionTests(unittest.TestCase):
     """#98: the flat `key:value` path reuses the SECRET_KEY guard, so a key token
     that CONTAINS a secret keyword anywhere (compound key) redacts its value, exactly
