@@ -58,9 +58,14 @@ class ControlByteStripTests(unittest.TestCase):
         # red-team: a secret keyword split by an INVISIBLE unicode char (not just
         # an ESC/C0/C1 byte) must be reassembled and redacted. ZWSP/ZWNJ/word-
         # joiner/BOM/soft-hyphen/NBSP all split a keyword so SECRET_KEY misses.
+        # cover the whole invisible/format CLASS, not just an enum: Cf (ZW*, bidi
+        # incl. U+061C, word-joiner, BOM, soft-hyphen, TAG) + default-ignorable
+        # non-Cf strays (NBSP, combining grapheme joiner, variation selectors).
         for name, sep in [("ZWSP", "\u200b"), ("ZWNJ", "\u200c"),
                           ("word-joiner", "\u2060"), ("BOM", "\ufeff"),
-                          ("soft-hyphen", "\u00ad"), ("NBSP", "\u00a0")]:
+                          ("soft-hyphen", "\u00ad"), ("NBSP", "\u00a0"),
+                          ("ALM-U+061C", "\u061c"), ("TAG-r", "\U000e0072"),
+                          ("var-selector", "\ufe0f"), ("CGJ", "\u034f")]:
             with self.subTest(sep=name):
                 payload = f"authorization: Bea{sep}rer SECRETLEAK123"
                 out = self.server._redact_scanner_data(payload)
