@@ -331,11 +331,20 @@ class SslDashTargetGuardTests(unittest.TestCase):
                 self.assertIn("must not begin with", out)
 
     def test_normal_target_not_rejected(self):
-        # a legitimate host must still reach the tool (execute_command mocked)
-        calls, fake = _capture(stdout="Testing SSL")
-        with patch.object(self.server, "execute_command", fake):
-            out = asyncio.run(self.server.sslyze_scan(target="example.com"))
-        self.assertTrue(calls, "guard wrongly rejected a normal target")
+        # a legitimate host must still reach the tool across all three wrappers
+        for fn in ("sslscan_scan", "sslyze_scan", "testssl_scan"):
+            with self.subTest(tool=fn):
+                calls, fake = _capture(stdout="Testing SSL")
+                with patch.object(self.server, "execute_command", fake):
+                    asyncio.run(getattr(self.server, fn)(target="example.com"))
+                self.assertTrue(calls, f"{fn} guard wrongly rejected a normal target")
+
+    def test_bracketed_non_ipv6_target_does_not_crash(self):
+        # red-team: a bracketed non-IPv6 target ([foo]) crashed _target_host_port
+        # with an uncaught ValueError; it must degrade to a string, not raise.
+        for t in ("[foo]", "[example.com]", "[::g]"):
+            with self.subTest(target=t):
+                self.assertIsInstance(self.server._target_host_port(t, "443"), str)
 
 
 if __name__ == "__main__":
