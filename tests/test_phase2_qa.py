@@ -85,10 +85,18 @@ class ControlByteStripTests(unittest.TestCase):
         # no colon). The gap is bounded {0,120} now -> linear. A 200KB pathological
         # input finished in ~19s before the bound, ~0.2s after; 2s guards regression.
         import time
-        payload = "'token' " * (200 * 1024 // 8)
-        start = time.time()
-        self.server._redact_scanner_data(payload)
-        self.assertLess(time.time() - start, 2.0, "nikto pattern went quadratic again")
+        # Two O(n^2) sources lived in this one pattern: the name->contents gap AND
+        # the quoted-name spans. Exercise BOTH -- the many-quotes shape (closing
+        # quote every 8 chars) and the unterminated-quote / keyword-dense shape
+        # (the one that pins the quoted-name span). Both must be linear.
+        for label, payload in (
+            ("many quotes", "'token' " * (200 * 1024 // 8)),
+            ("unterminated quote", "'" + "authorization" * (200 * 1024 // 13)),
+        ):
+            with self.subTest(shape=label):
+                start = time.time()
+                self.server._redact_scanner_data(payload)
+                self.assertLess(time.time() - start, 2.0, f"nikto pattern quadratic: {label}")
 
     def test_whitespace_separator_folded_not_deleted(self):
         # red-team B1: a keyword/value separator that is NBSP/NEL/a C0-C1 control /
