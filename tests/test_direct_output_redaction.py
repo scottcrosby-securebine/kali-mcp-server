@@ -81,6 +81,9 @@ class DirectOutputRedactionTests(unittest.TestCase):
         # #74 red-team R2-2: a real colon-terminated Basic credential (base64-
         # shaped) must redact even though the "Basic options:" label survives.
         ("a colon-terminated Basic credential", "proxy log Basic dXNlcjpwYXNz: 401\n", "dXNlcjpwYXNz"),
+        # #74 red-team R3-1: an ALL-LOWERCASE colon-terminated base64 credential
+        # must also redact (the shape guard missed it; the label-exemption does not).
+        ("a lowercase colon-terminated Basic credential", "log Basic ajph: done\n", "ajph"),
         # #74 red-team R2-4: X-Auth-Key header value in text must redact.
         ("an X-Auth-Key header value", "X-Auth-Key: LEAKAUTHVALUE987xyz\n", "LEAKAUTHVALUE987xyz"),
     )
