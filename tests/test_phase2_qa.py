@@ -116,8 +116,12 @@ class TargetHostPortTests(unittest.TestCase):
         calls, fake = _capture(stdout="Testing SSL server")
         with patch.object(self.server, "execute_command", fake):
             asyncio.run(self.server.sslscan_scan(target="127.0.0.1:8099"))
-        self.assertIn("127.0.0.1:8099", calls[0])
-        self.assertNotIn("127.0.0.1:8099:443", calls[0])
+        argv = calls[0]
+        self.assertIn("127.0.0.1:8099", argv)
+        self.assertNotIn("127.0.0.1:8099:443", argv)
+        # #72: options must precede the target or sslscan prints usage and exits 0.
+        self.assertEqual("127.0.0.1:8099", argv[-1])
+        self.assertTrue(any(a.startswith("--xml=") for a in argv[:-1]))
 
 
 class WebAuditHostExtractionTests(unittest.TestCase):

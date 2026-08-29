@@ -5,11 +5,15 @@ Branch: `fix/post-ship-qa-batch`. Issue-ref resolution: `docs/agents/issue-track
 
 ## Scope decisions (verbatim, Scott, 2026-08-29)
 
-- **Done 6:** "Close with evidence" — #39, #40, #44, #45, #72, #73 reproduce as
-  fixed in HEAD; post an evidence comment citing the fixing commit/lines on each,
-  then close as completed.
-- **Fix scope:** "5 defects + 2 remainders" — code-fix F1–F7 below under the
-  doctrine gate. Closes every open issue this session.
+- **Done 4 (closed with evidence):** #39, #40, #44, #45 reproduce as fixed in
+  HEAD and shipped in v2.0.0 (filed before the release); closed with evidence
+  comments this session.
+- **#72/#73 REVISED (Scott D3):** originally slated to close as "already fixed",
+  but their fix commits are ancestors of the v2.0.0 tag while the issues were
+  filed AGAINST v2.0.0 reporting the failure — the code did not cure the runtime.
+  Root cause of #72 is #82. Both are now code-fixed in Phase 2 (F8/F12), not closed.
+- **Fix scope:** F1–F7 (Phase 1) + F8–F12 (Phase 2, folded per D3) under the
+  doctrine gate, with runtime container verification.
 
 Structural: all 7 fixes touch the single file `kali_pentest_server.py`, so
 mutations serialize (doctrine's single-file rule). Fan-out is the phase gate
@@ -99,3 +103,34 @@ this file as spec path, fixed point `31dbb83`). Red team: `codex:codex-rescue`.
 Simplification once before the certifying passes. Exit: two consecutive clean
 passes. Delivery: commit on `fix/post-ship-qa-batch`; **hold for "push it"**
 before any push or PR (standing rule + repo dev→PR→deploy norm).
+
+## Phase 2 fixes (F8-F12) — folded in per Scott D3 (2026-08-29)
+
+- **F8 — #82 (fixes #72).** SSL tools built `f"{target}:{port}"` unconditionally,
+  so a port-bearing target became `host:8099:443` -> sslscan usage -> false ✅.
+  `_target_host_port(target, default)` parses host/port once with urlsplit (embedded
+  port wins, scheme/userinfo dropped, IPv6 re-bracketed); applied to sslscan,
+  sslyze, testssl. sslscan also treats a `Usage:` banner as a failure marker.
+  **AC:** `host:8099` scans host:8099 (no triple colon); explicit+embedded port
+  resolved once; #72 usage-banner-as-success gone. **Seam:** _target_host_port unit
+  table + sslscan argv test.
+- **F9 — #81.** whatweb/wafw00f/sslyze/nikto/sslscan exit 0 on a failed connection
+  -> false ✅ persisted as coverage. `run_command` gains `failure_markers`: an exit-0
+  output containing a connection-failure signature demotes to ❌. **AC:** a refused/
+  unreachable scan reads ❌ and status=failed; a clean exit-0 stays ✅. **Seam:**
+  failure-marker demotion test + whatweb/sslyze wrapper tests.
+- **F10 — #80 SECURITY.** Scanner-controlled ANSI/OSC/CSI + C0/C1 bytes reached the
+  terminal and the HTML report. `_strip_control_bytes` runs in `run_command` (after
+  redaction, before classify/bound) and in `_escape_report_data`. **AC:** ESC/OSC/BEL
+  removed from output and report; tab/newline preserved. **Seam:** control-byte strip
+  tests on output + report escape.
+- **F11 — #83.** `web_audit` TLS stage hand-sliced the host and returned the userinfo
+  username for `https://user:pass@host/`. Now `urlsplit(target).hostname`. **AC:** the
+  TLS stage scans the real host. **Seam:** web_audit userinfo-URL test (mocked subs).
+- **F12 — #73.** `nmap_service_scan` gains `--host-timeout` (TIMEOUT_LONG-60s) so it
+  self-bounds and emits partial output. **AC:** argv carries a bounded --host-timeout.
+  **Seam:** nmap argv test.
+- #84 = track-only (mcp/pydantic transport, likely upstream). Not fixed here.
+
+Runtime verification (Scott): build the image and run the #80/#81/#82/#72/#73/#83
+repros in-container before certifying.
