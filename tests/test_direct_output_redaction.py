@@ -78,6 +78,11 @@ class DirectOutputRedactionTests(unittest.TestCase):
         ("nikto x-auth-key contents",
          "+ Uncommon header(s) 'x-auth-key' found, with contents: REAL_SECRET_123abc.\n",
          "REAL_SECRET_123abc"),
+        # #74 red-team R1: whitespace before the nikto `contents:` colon (a plain
+        # space, or an NBSP folded to one) must not defeat the anchor.
+        ("nikto contents colon with space",
+         "+ Uncommon header(s) 'authorization' found, with contents : SPACECOLONLEAK_998877.\n",
+         "SPACECOLONLEAK_998877"),
         # #74 red-team R2-2: a real colon-terminated Basic credential (base64-
         # shaped) must redact even though the "Basic options:" label survives.
         ("a colon-terminated Basic credential", "proxy log Basic dXNlcjpwYXNz: 401\n", "dXNlcjpwYXNz"),
