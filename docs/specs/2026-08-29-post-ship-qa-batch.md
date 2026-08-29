@@ -136,3 +136,21 @@ before any push or PR (standing rule + repo dev→PR→deploy norm).
 
 Runtime verification (Scott): build the image and run the #80/#81/#82/#72/#73/#83
 repros in-container before certifying.
+
+## Backlog fold-in (Scott, 2026-08-29): #96 + #97
+
+Folded into this branch after the F1-F12 gate exited; same security-hardening theme.
+
+- **#96 — PEM redaction ReDoS (pre-existing).** The PEM private-key pattern in
+  `SECRET_VALUE_PATTERNS` used an unbounded `[\s\S]*?` between BEGIN and END, O(n^2)
+  on target-reflected content with many unpaired openers. **AC:** the pattern is
+  bounded so redaction is linear (a real key body <=~13KB still redacts; a genuine
+  paired key is unaffected). **Seam:** timing guard (8000 unpaired openers < 2.5s;
+  verified to exceed it on the unbounded pattern) + a real-key-still-redacts test.
+- **#97 — SSL wrappers missing the leading-dash guard.** `sslscan_scan`,
+  `sslyze_scan`, `testssl_scan` called `validate_target` but not
+  `_reject_option_like`, so a dash-flag target (`--xml=/tmp/x`) reached the tool as
+  an extra argv (CWE-88, operator-supplied/low). **AC:** a target beginning with `-`
+  is rejected with the standard guard error before argv construction; a normal
+  target still reaches the tool. **Seam:** the three wrappers reject a dash target;
+  a normal target still calls execute_command.
