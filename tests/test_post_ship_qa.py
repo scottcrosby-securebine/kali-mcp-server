@@ -257,6 +257,10 @@ class CompoundKeyRedactionTests(unittest.TestCase):
         "secret_hash=BASE64HASHVALUE==",              # AWS Cognito SecretHash (red-team F1)
         "api_key_prefix=live_abc",
         "db_password_hash=argon2hash",
+        # red-team round 2 F1: a secret keyword >64 chars deep in a dotted/namespaced
+        # key must still redact (no prefix-length ceiling -- keyword matched anywhere)
+        "spring.datasource.hikari.data-source-properties.deep.nested.path.secret=hunter2SECRETVAL",
+        "com.example.service.integration.thirdparty.oauth.client.credentials.token=SECRETTOKENVAL",
         # keyword already adjacent to the separator (regressions)
         "db_password=hunter2",
         "admin_password=p@ssw0rd",

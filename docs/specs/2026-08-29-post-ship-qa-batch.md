@@ -174,12 +174,14 @@ to complete the Phase-1 correctness lane (ROADMAP rows 5, 12).
 - **#98 — compound-key credential leak on flat text path.** The flat `key:value`
   pattern required a secret keyword ADJACENT to the `:`/`=`, so a compound key whose
   keyword is a mid/prefix segment leaked (`aws_secret_access_key=`, `SECRET_KEY_BASE=`
-  Rails master secret, `secret_id=` Vault AppRole SecretID). Fix: the flat pattern now
-  captures a key token (`[\w.\-]{1,128}`, a single bounded run) + separator + value,
-  the key token now carries a bounded prefix/suffix around the required keyword
-  (`[\w.\-]{0,64}? (?:_SECRET_KEYWORD_ALT) [\w.\-]{0,64}`), reusing the shared
-  keyword alternation. Anchoring on the KEYWORD (not on any key token) is what keeps a
-  multi-pair line safe: `host: X  login: Y  password: Z` matches only at `password`.
+  Rails master secret, `secret_id=` Vault AppRole SecretID). Fix: the flat pattern
+  matches the keyword ANYWHERE (no left anchor -- as the base pattern did, so an
+  arbitrarily long key prefix like `spring.datasource...secret=` still matches) plus a
+  bounded generic suffix for the trailing key segments: `(?:_SECRET_KEYWORD_ALT)[\w.\-]{0,64}\s*[:=]`,
+  reusing the shared keyword alternation. Matching on the KEYWORD (a non-secret key
+  carries none) is what keeps a multi-pair line safe: `host: X  login: Y  password: Z`
+  matches only at `password`, and the anchored-prefix variant that leaked keys deeper
+  than 64 chars (red-team round 2 F1) was discarded for this keyword-anywhere form.
   This closes the compound-key CLASS (not an enumerated shape list) and aligns flat
   redaction with the structured dict-key guard, which already redacts `{"token_count": ...}`. **Consequence, stated honestly:** a benign key whose token
   contains a secret keyword (e.g. `token_count=5`, `secret_keys=0`) now redacts on flat
@@ -187,7 +189,7 @@ to complete the Phase-1 correctness lane (ROADMAP rows 5, 12).
   and the `redaction_differential` sweep destroys 0 content the real scanner corpus
   keeps (exit 0 vs base `1dc23f7`). A key with no secret keyword (`content_length`,
   `retry_count`, `access_key_id` -- a public id, no `secret`/`api_key` substring) is
-  untouched. ReDoS-safe: both key-token segment runs are bounded ({0,64}) and the value arm is
+  untouched. ReDoS-safe: the suffix run is bounded ({0,64}) and the value arm is
   the existing opener-guarded `[^\r\n]` star (red-team timing: linear, 176 KB -> 142 ms).
   **AC:** MUST_REMOVE (the compound-key class incl. SECRET_KEY_BASE / secret_id /
   secret_hash / api_key_prefix + adjacency regressions) all redact; MUST_KEEP
