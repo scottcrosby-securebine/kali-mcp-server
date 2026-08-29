@@ -90,6 +90,17 @@ class FalseSuccessDemotionTests(unittest.TestCase):
             out = asyncio.run(self.server.sslyze_scan(target="127.0.0.1", port="1"))
         self.assertTrue(out.startswith("❌"), out)
 
+    def test_marker_matching_is_case_insensitive(self):
+        out = self.run_with(0, "ERROR: CONNECTION REFUSED by peer",
+                            failure_markers=self.server._CONNECT_FAILURE_MARKERS)
+        self.assertTrue(out.startswith("❌"), out)
+
+    def test_discarding_alone_no_longer_over_demotes(self):
+        # "discarding" was dropped as a marker; a legit scan mentioning it stays ✅.
+        out = self.run_with(0, "discarding duplicate finding for host",
+                            failure_markers=self.server._CONNECT_FAILURE_MARKERS)
+        self.assertTrue(out.startswith("✅"), out)
+
 
 class TargetHostPortTests(unittest.TestCase):
     """#82: build host:port once, never double-append a port."""
@@ -137,8 +148,9 @@ class WebAuditHostExtractionTests(unittest.TestCase):
         async def noop(*a, **k):
             return "✅ ok"
 
-        async def record_sslscan(host, *a, **k):
+        async def record_sslscan(host, port="443", *a, **k):
             seen["host"] = host
+            seen["port"] = port
             return "✅ ok"
 
         async def dedup(urls):

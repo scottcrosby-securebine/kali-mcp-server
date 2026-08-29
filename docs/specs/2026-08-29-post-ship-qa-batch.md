@@ -90,8 +90,10 @@ issue bodies; the Spec reviewer resolves `#N` via the issue tracker.
 ## Close-with-evidence (Done 6)
 
 #39, #40 (EPSS/KEV, commit 260afbd), #44 (web scheme, fdc5fe9), #45 (hashcat
-self-test + pocl, 6dc150a/5dbee82), #72 (sslscan passes target, HEAD), #73 (nmap
-`--top-ports=100` default, HEAD). Comment cites the fix, then close as completed.
+self-test + pocl, 6dc150a/5dbee82) — closed with evidence this session.
+**#72/#73 are NOT here** — they were reported against v2.0.0 with the code fix
+already in it (runtime ≠ code), so they are code-fixed in Phase 2 (F8/F12), not
+closed as bookkeeping. See the revised note in Scope decisions.
 
 ## Gate
 
