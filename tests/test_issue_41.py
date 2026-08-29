@@ -194,5 +194,46 @@ class ContextualRiskSeam(unittest.TestCase):
         self.assertEqual("h", self.server._host_of("https://user:pass@h/p"))
 
 
+class ExecLayerP1(unittest.TestCase):
+    """Wave-2 P1: the bold exec layer (scope box + posture hero + traffic-lights)."""
+
+    def setUp(self):
+        self.server, _ = load_server()
+        for name in ("_risk_bullet", "_posture"):
+            if not hasattr(self.server, name):
+                self.skipTest(f"{name} absent on this revision")
+
+    def test_risk_bullet_is_scriptless_svg_with_score_and_label(self):
+        svg = self.server._risk_bullet(84, "High")
+        self.assertIn("<svg", svg)
+        self.assertNotIn("<script", svg)
+        self.assertIn("aria-label", svg)
+        self.assertIn("84", svg)          # the datum survives as text (no tooltip)
+
+    def test_posture_is_the_max_unit_risk(self):
+        # work_units are (sort_key_tuple, ...) with risk at key[0].
+        units = [((40, 1, False, 0, 0, 0, 1),), ((88, 1, False, 0, 0, 0, 1),)]
+        self.assertEqual((88, "High"), self.server._posture(units))
+        self.assertEqual((0, "Info"), self.server._posture([]))
+
+    def test_exec_layer_renders_scope_box_hero_and_traffic_lights(self):
+        report = _combined(self.server, [_result([
+            {"VulnerabilityID": "CVE-2021-44228", "Severity": "CRITICAL", "Title": "x"}])])
+        # scope box: honesty + handling
+        self.assertIn("detection-only", report)
+        self.assertIn("TLP", report)
+        # posture hero
+        self.assertIn("hero", report)
+        self.assertIn("indicative", report)
+        # traffic-light KRI row
+        self.assertIn("tl-row", report)
+        self.assertIn("actively exploited", report)
+
+    def test_no_scored_units_states_it_rather_than_zero(self):
+        report = _combined(self.server, [_result(
+            [{"id": "info-1", "Severity": "INFO", "Title": "banner"}], scanner="whatweb")])
+        self.assertIn("No scored findings", report)
+
+
 if __name__ == "__main__":
     unittest.main()
