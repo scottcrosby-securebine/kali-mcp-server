@@ -219,6 +219,13 @@ class CombinedTrailerTests(unittest.TestCase):
             out = self._run(s.network_sweep("10.0.0.0/24"))
         self.assertTrue(self._trailer(out).startswith("❌"), out)
 
+    def test_network_sweep_mixed_is_warning(self):
+        s = self.server
+        with patch.object(s, "nmap_scan", self._ok), \
+             patch.object(s, "nbtscan_scan", self._fail):
+            out = self._run(s.network_sweep("10.0.0.0/24"))
+        self.assertTrue(self._trailer(out).startswith("⚠️"), out)
+
     def test_network_sweep_all_pass_is_success(self):
         s = self.server
         with patch.object(s, "nmap_scan", self._ok), \
@@ -228,34 +235,43 @@ class CombinedTrailerTests(unittest.TestCase):
 
 
 class CompoundKeyRedactionTests(unittest.TestCase):
-    """#98: a secret keyword as a non-adjacent segment of a compound key must
-    still redact the value on the flat text path, WITHOUT over-redacting benign
-    metric keys. Paired MUST_REMOVE / MUST_KEEP corpus (issue asks for one)."""
+    """#98: the flat `key:value` path reuses the SECRET_KEY guard, so a key token
+    that CONTAINS a secret keyword anywhere (compound key) redacts its value, exactly
+    as the structured dict-key path already does. MUST_REMOVE = key contains a secret
+    keyword (incl. the compound-key class the issue names); MUST_KEEP = key has no
+    secret keyword. Paired corpus (issue asks for one)."""
 
     @classmethod
     def setUpClass(cls):
         cls.server, _ = load_server()
 
     MUST_REMOVE = (
+        # compound-key class the issue names (keyword is a mid/prefix segment)
         "aws_secret_access_key=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
         "AWS_SECRET_ACCESS_KEY=UPPERVAL1234567890",
         "api_key_value=abcdef123456",
         "secret_access_key=topsecretval",
         "app.secret.key=deadbeefcafe",
-        # regressions: keyword already adjacent to the separator
+        "SECRET_KEY_BASE=abc123railssigningsecret",   # Rails master secret (red-team F1)
+        "secret_id=b1c2d3e4-role-secret",             # Vault AppRole SecretID (red-team F1)
+        "secret_hash=BASE64HASHVALUE==",              # AWS Cognito SecretHash (red-team F1)
+        "api_key_prefix=live_abc",
+        "db_password_hash=argon2hash",
+        # keyword already adjacent to the separator (regressions)
         "db_password=hunter2",
         "admin_password=p@ssw0rd",
         "session=abc123def456",
     )
     MUST_KEEP = (
-        "token_count=5",
-        "session_timeout=30",
-        "password_length=8",
-        "secret_count=3",
+        # no secret keyword anywhere in the key token -> value intact
+        "content_length=1234",
         "retry_count=2",
-        "max_tokens=4096",
+        "max_connections=10",
+        "status_code=200",
+        "request_id=abc-123",
+        "build_number=42",
         "error_code=500",
-        "cookie_jar_size=12",
+        "access_key_id=AKIAIOSFODNN7EXAMPLE",   # public AWS key id: no 'secret'/'api_key' substring
     )
 
     def test_must_remove(self):

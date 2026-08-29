@@ -163,24 +163,33 @@ to complete the Phase-1 correctness lane (ROADMAP rows 5, 12).
 - **#87 — quick_recon / network_sweep false ✅.** Both appended a hard-coded
   `✅ ... completed` regardless of child status; a fully-failed sweep read green
   on its last line (same family as #81). New shared helper `_workflow_trailer(label,
-  checks)` picks `✅` (all passed) / `⚠️ completed with failed checks` (some failed)
-  / `❌ failed: every attempted check failed` (all failed), mirroring full_recon's
-  tiers. Both tools now build a `checks` list via the existing `_workflow_check`.
+  checks)` classifies via the existing `_workflow_status` (one classifier for every
+  combined tool, incl. skipped-check handling) and returns `✅` (all passed) /
+  `⚠️ completed with failed checks` (some failed) / `❌ failed: every attempted check
+  failed` (all failed). `full_recon` and `web_audit` were migrated onto the same
+  helper, so the trailer wording lives in ONE place (was duplicated in three).
   **AC:** all children fail -> ❌; some fail -> ⚠️; all pass -> ✅. **Seam:**
-  CombinedTrailerTests (all-fail / mixed / all-pass, both tools, mocked children).
+  CombinedTrailerTests (all-fail / mixed / all-pass, BOTH tools, mocked children);
+  the full_recon/web_audit suites pin the migration.
 - **#98 — compound-key credential leak on flat text path.** The flat `key:value`
-  pattern required a secret keyword adjacent to the `:`/`=`, so
-  `aws_secret_access_key=` and `api_key_value=` leaked (keyword is a mid/prefix
-  segment). Fix: after the keyword alternation, allow a bounded closed set of
-  secret-suffix segments `(?:[_.\-](?:access[_.\-]?key|keys?|values?|token|secret|
-  passwd|password)){0,6}` before the separator. The suffix set is closed and
-  credential-only, so `token_count=`, `secret_count=`, `password_length=`,
-  `cookie_jar_size=` (benign metric suffixes) stay untouched — no over-redaction.
-  Bounded `{0,6}` quantifier over separator-anchored segments = no ReDoS.
-  **AC:** paired MUST_REMOVE (aws_secret_access_key, api_key_value, secret_access_key,
-  dotted app.secret.key, + adjacency regressions) all redact; MUST_KEEP (token_count,
-  session_timeout, password_length, secret_count, retry_count, max_tokens,
-  error_code, cookie_jar_size) all intact. **Seam:** CompoundKeyRedactionTests
-  (MUST_REMOVE / MUST_KEEP corpus); redaction_differential sweep destroys 0
-  base-kept content. **Scope:** flat text path only; structured JSON + HTML already
-  guard via SECRET_KEY dict-key match. #84 stays track-only (upstream transport).
+  pattern required a secret keyword ADJACENT to the `:`/`=`, so a compound key whose
+  keyword is a mid/prefix segment leaked (`aws_secret_access_key=`, `SECRET_KEY_BASE=`
+  Rails master secret, `secret_id=` Vault AppRole SecretID). Fix: the flat pattern now
+  captures a key token (`[\w.\-]{1,128}`, a single bounded run) + separator + value,
+  the key token now carries a bounded prefix/suffix around the required keyword
+  (`[\w.\-]{0,64}? (?:_SECRET_KEYWORD_ALT) [\w.\-]{0,64}`), reusing the shared
+  keyword alternation. Anchoring on the KEYWORD (not on any key token) is what keeps a
+  multi-pair line safe: `host: X  login: Y  password: Z` matches only at `password`.
+  This closes the compound-key CLASS (not an enumerated shape list) and aligns flat
+  redaction with the structured dict-key guard, which already redacts `{"token_count": ...}`. **Consequence, stated honestly:** a benign key whose token
+  contains a secret keyword (e.g. `token_count=5`, `secret_keys=0`) now redacts on flat
+  text too -- this is the structured path's long-standing behaviour, not a new policy,
+  and the `redaction_differential` sweep destroys 0 content the real scanner corpus
+  keeps (exit 0 vs base `1dc23f7`). A key with no secret keyword (`content_length`,
+  `retry_count`, `access_key_id` -- a public id, no `secret`/`api_key` substring) is
+  untouched. ReDoS-safe: both key-token segment runs are bounded ({0,64}) and the value arm is
+  the existing opener-guarded `[^\r\n]` star (red-team timing: linear, 176 KB -> 142 ms).
+  **AC:** MUST_REMOVE (the compound-key class incl. SECRET_KEY_BASE / secret_id /
+  secret_hash / api_key_prefix + adjacency regressions) all redact; MUST_KEEP
+  (no-keyword keys) all intact. **Seam:** CompoundKeyRedactionTests; redaction_differential.
+  **Scope:** flat text path only; #84 stays track-only (upstream transport).
