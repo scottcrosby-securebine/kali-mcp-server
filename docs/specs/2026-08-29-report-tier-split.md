@@ -228,6 +228,60 @@ analysis", never "safe" (RB2/RB4).
   "not executed" coverage qualifier; a nikto report shows no verdict hero; the macro
   body finding rows are unchanged.
 
+### P3c — Metasploit reference card (THIS SUB-PHASE)
+
+A `metasploit_search`/`metasploit_info` report is a CATALOG LOOKUP, not an assessment of
+any target. It must **strip the severity chrome entirely** and render a per-module
+reference card. Scope RULING (Scott, 2026-08-30): **Full parse** — this supersedes the
+deliberate no-parse capture decision in `_raw_text_parser` for metasploit only, contained
+by best-effort parsing with a raw-transcript fallback.
+
+- **MC1 Parse (render-time, best-effort).** `_parse_msf_search(text)` reads the "Matching
+  Modules" table by HEADER-COLUMN positions (robust to the optional Disclosure Date/Check
+  columns) → a list of `{name, mtype, disclosure, rank, description}`; `_parse_msf_info(text)`
+  reads the `Key: Value` header (Name/Module/Rank/Disclosed) + References + Available
+  targets + Basic options → one `{name, module, mtype, rank, disclosed, platform, cves, refs,
+  targets, options}`. `mtype` is derived from the module path prefix (exploit→Exploit,
+  auxiliary→Auxiliary, post→Post, payload→Payload, encoder→Encoder, nop→NOP,
+  evasion→Evasion). CVEs are extracted as `CVE-\d{4}-\d{3,7}` from refs/text. On ANY parse
+  miss (no table / no header), return empty and the render FALLS BACK to the raw
+  transcript — never a fabricated card. Parses the transcript from the finding `evidence`
+  (already redacted at capture), so capture/redaction is untouched.
+- **MC2 Strip severity chrome (ALWAYS).** A metasploit report renders NO per-finding
+  Severity mark, NO detection-confidence chip, NO "Highest severity" tile, and NO Severity
+  chart (the section says "Not applicable — catalog lookup") — whether the transcript
+  parsed into cards OR fell back to raw, because a catalog lookup carries no target
+  severity either way (Spec-axis R1-F1). On a parse miss the catalog banner still frames
+  the report and the raw transcript renders in a NEUTRAL card (no severity/conf). Module **rank** (manual/low/average/
+  normal/good/great/excellent — Rapid7's own reliability field) is shown as a NEUTRAL
+  badge, never colour-mapped to severity. Any severity colouring here is the specific
+  dishonesty to avoid.
+- **MC3 Reference cards.** Each module renders a `.msf-card`: module name + path, type
+  badge, disclosure date, neutral rank badge, CVE/reference list (inert text, never an
+  `<a href>`), targets, and key option names. `metasploit_info` renders one detailed card;
+  `metasploit_search` renders one compact card per matched module (bounded).
+- **MC4 Catalog banner + disclaimer.** The exec summary opens with a `.msf-catalog` banner
+  carrying the one-line disclaimer "Catalog lookup — a Metasploit module reference, NOT an
+  assessment or finding against any target," plus the module count. Because MC2 removes the
+  "Highest severity" tile, the tile row is rebuilt to NEUTRAL catalog tiles (Modules /
+  Lookup / Assessment="Catalog, not a target scan" / Source). A non-metasploit report shows
+  no catalog banner.
+- **MC5 Scriptless + a11y + scope.** Inline HTML + token colour, CSP unchanged, the rank
+  WORD always present (never colour alone); references stay inert text; the raw transcript
+  remains available as the fallback body; the combined report is untouched.
+
+### Seams (P3c)
+
+- `_parse_msf_search` teaching cases: the minimal 3-column table (#/Name/Rank/Description)
+  and the full 5-column table (+Disclosure Date/Check) both parse to the same module
+  fields via header-column positions; a transcript with no "Matching Modules" table → [].
+- `_parse_msf_info` teaching cases: Name/Module/Rank/Disclosed header parsed; CVEs pulled
+  from References; targets + option names captured; a non-info transcript → {} / None.
+- render tests: a metasploit report shows the `.msf-catalog` disclaimer + `.msf-card`(s),
+  the rank as a neutral badge, and NO Severity mark / NO conf chip / NO severity chart; an
+  unparseable metasploit transcript falls back to the raw text; a nikto report shows no
+  catalog banner.
+
 - **P4 — Mappings + evidence + SLA** (the old epic M3/M4/M5): CWE→ATT&CK/NIST,
   evidence blocks, auto SLA/benchmark from band.
 

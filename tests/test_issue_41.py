@@ -781,5 +781,162 @@ class MacroVerdictHeroP3b(unittest.TestCase):
 
 
 
+class MetasploitCardP3c(unittest.TestCase):
+    """Wave-2 P3c: a metasploit_search/metasploit_info report is a CATALOG LOOKUP -- it
+    strips the severity chrome and renders per-module reference cards with a NEUTRAL rank
+    badge (Rapid7 reliability, never severity). Full parse (Scott 2026-08-30), best-effort
+    with a raw-transcript fallback on any parse miss."""
+
+    SEARCH_MINI = ("Matching Modules\n"
+                   "   #  Name                              Rank    Description\n"
+                   "   0  auxiliary/scanner/smb/smb_version  normal  SMB Version Detection")
+    SEARCH_FULL = ("Matching Modules\n================\n\n"
+                   "   #  Name                                      Disclosure Date  Rank     Check  Description\n"
+                   "   -  ----                                      ---------------  ----     -----  -----------\n"
+                   "   0  exploit/windows/smb/ms17_010_eternalblue  2017-03-14       average  Yes    MS17-010 EternalBlue\n"
+                   "   1  auxiliary/scanner/smb/smb_ms17_010        2017-03-14       normal   No     MS17-010 Detection\n")
+    INFO = ("       Name: EternalBlue\n     Module: exploit/windows/smb/ms17_010_eternalblue\n"
+            "   Platform: Windows\n       Rank: Average\n  Disclosed: 2017-03-14\n\n"
+            "Available targets:\n  Id  Name\n  --  ----\n  0   Automatic Target\n\n"
+            "Basic options:\n  Name    Current Setting  Required  Description\n  ----    -----\n"
+            "  RHOSTS                   yes  host\n\n"
+            "References:\n  https://nvd.nist.gov/vuln/detail/CVE-2017-0144\n")
+
+    def setUp(self):
+        self.server, _ = load_server()
+        if not hasattr(self.server, "_parse_msf_search"):
+            self.skipTest("_parse_msf_search absent on this revision")
+
+    def _report(self, scanner, transcript):
+        return self.server._render_report({
+            "schema_version": 1, "scanner": scanner, "status": "success",
+            "source_type": "cli", "target_ref": "q", "metadata": {},
+            "findings": [{"id": f"{scanner}-q", "Severity": "INFO", "Title": "t",
+                          "evidence": transcript}]})
+
+    # --- parsers --------------------------------------------------------------
+    def test_search_minimal_and_full_layouts_parse(self):
+        mini = self.server._parse_msf_search(self.SEARCH_MINI)
+        self.assertEqual(1, len(mini))
+        self.assertEqual("auxiliary/scanner/smb/smb_version", mini[0]["name"])
+        self.assertEqual("Auxiliary", mini[0]["mtype"])
+        self.assertEqual("normal", mini[0]["rank"])
+        full = self.server._parse_msf_search(self.SEARCH_FULL)
+        self.assertEqual(2, len(full))
+        self.assertEqual("exploit/windows/smb/ms17_010_eternalblue", full[0]["name"])
+        self.assertEqual("Exploit", full[0]["mtype"])
+        self.assertEqual("2017-03-14", full[0]["disclosure"])
+        self.assertEqual("average", full[0]["rank"])
+
+    def test_search_no_table_returns_empty(self):
+        self.assertEqual([], self.server._parse_msf_search("random text, no modules table"))
+        self.assertEqual([], self.server._parse_msf_search(""))
+
+    def test_info_parses_header_cves_targets_options(self):
+        d = self.server._parse_msf_info(self.INFO)
+        self.assertEqual("exploit/windows/smb/ms17_010_eternalblue", d["module"])
+        self.assertEqual("Exploit", d["mtype"])
+        self.assertEqual("Average", d["rank"])
+        self.assertEqual("2017-03-14", d["disclosed"])
+        self.assertIn("CVE-2017-0144", d["cves"])
+        self.assertIn("Automatic Target", d["targets"])
+        self.assertIn("RHOSTS", d["options"])
+
+    def test_info_non_info_returns_none(self):
+        self.assertIsNone(self.server._parse_msf_info("no key value pairs at all"))
+        self.assertIsNone(self.server._parse_msf_info(""))
+
+    def test_module_type_mapping(self):
+        self.assertEqual("Post", self.server._msf_module_type("post/windows/gather/x"))
+        self.assertEqual("Payload", self.server._msf_module_type("payload/generic/shell"))
+        self.assertEqual("Module", self.server._msf_module_type("weird/thing"))
+
+    # --- render: strip severity chrome, show catalog + cards ------------------
+    def test_search_report_shows_catalog_and_cards_no_severity_chrome(self):
+        h = self._report("metasploit_search", self.SEARCH_FULL)
+        self.assertIn('class="hero msf-catalog"', h)      # catalog banner
+        self.assertIn("not an assessment of any target", h)
+        self.assertIn('<article class="msf-card"', h)     # per-module card
+        self.assertIn("ms17_010_eternalblue", h)
+        self.assertIn("rank: average", h)                 # neutral rank badge
+        self.assertNotIn("Highest severity", h)           # severity tile stripped
+        self.assertIn("no target severity", h)            # severity chart N/A
+        # no per-card Severity mark or detection-confidence chip
+        card = h.split('<article class="msf-card"', 1)[1]
+        self.assertNotIn('class="sev', card)
+        self.assertNotIn('class="conf ', card)
+        self.assertNotIn("<script", h)
+
+    def test_info_report_shows_detailed_card(self):
+        h = self._report("metasploit_info", self.INFO)
+        self.assertIn('<article class="msf-card"', h)
+        self.assertIn("CVE-2017-0144", h)
+        self.assertIn("Automatic Target", h)
+        self.assertIn("RHOSTS", h)
+        self.assertIn("Average", h)                        # rank word present
+
+    def test_unparseable_transcript_falls_back_to_raw_without_severity_chrome(self):
+        # MC2: a catalog lookup NEVER shows severity chrome, parsed or not. On a parse
+        # miss the raw transcript is shown in a neutral card under the catalog banner,
+        # with NO "Highest severity" tile, NO Severity chart, NO conf chip.
+        h = self._report("metasploit_search", "No results from the module database.")
+        self.assertIn('class="hero msf-catalog"', h)        # catalog framing still shown
+        self.assertIn("could not be parsed", h)             # honest parse-miss wording
+        self.assertIn("No results from the module database", h)  # raw transcript kept
+        self.assertIn('class="msf-raw"', h)                 # raw card, not a fabricated one
+        self.assertNotIn("Highest severity", h)             # severity tile stripped
+        self.assertIn("no target severity", h)              # severity chart N/A
+        self.assertNotIn('class="conf ', h)                 # no confidence chip
+        self.assertNotIn('class="sev sev-', h)              # no coloured severity mark
+
+    def test_ansi_colour_codes_do_not_misslice_columns(self):
+        # red-team B1: msfconsole colorizes non-TTY `search` data rows (keyword highlight
+        # + rank colour) but not the header, so header-relative column slicing shifts on
+        # the zero-width ANSI bytes -> mangled name and a garbage rank badge. The parser
+        # must strip ANSI before slicing.
+        esc = "\x1b"
+        row = (f"   0  auxiliary/scanner/{esc}[1m{esc}[43msmb{esc}[0m/"
+               f"{esc}[1m{esc}[43msmb{esc}[0m_version  {esc}[32mnormal{esc}[0m  SMB Version Detection")
+        tx = "Matching Modules\n   #  Name                              Rank    Description\n" + row
+        mods = self.server._parse_msf_search(tx)
+        self.assertEqual(1, len(mods))
+        self.assertEqual("auxiliary/scanner/smb/smb_version", mods[0]["name"])
+        self.assertEqual("normal", mods[0]["rank"])
+        self.assertNotIn(esc, mods[0]["name"] + mods[0]["rank"])
+        # info transcript ANSI stripped too
+        info = f"       Name: {esc}[1mEB{esc}[0m\n     Module: exploit/windows/smb/eb\n       Rank: Average\n"
+        self.assertEqual("exploit/windows/smb/eb", self.server._parse_msf_info(info)["module"])
+
+    def test_wrapped_description_line_is_not_a_phantom_module(self):
+        # red-team N3: a wrapped Description continuation line beginning with a digit
+        # ("3.5 and later versions") must not parse as a module. A real row's Name is a
+        # module path (contains "/"); the continuation has none, so it is dropped.
+        tx = ("Matching Modules\n   #  Name                          Rank    Description\n"
+              "   0  exploit/multi/http/foo         normal  Works on Apache\n"
+              "   3.5 and later versions\n")
+        mods = self.server._parse_msf_search(tx)
+        self.assertEqual(1, len(mods))
+        self.assertEqual("exploit/multi/http/foo", mods[0]["name"])
+
+    def test_truncation_marker_does_not_misslice_into_rank(self):
+        # red-team N2: the capture-time "… [truncated]" marker in the final table row
+        # must not be sliced into the rank column (rank showing "uncated]").
+        tx = ("Matching Modules\n"
+              "   #  Name                              Rank    Description\n"
+              "   0  auxiliary/scanner/smb/smb_version  normal  SMB Version Detection\n"
+              "   1  auxiliary/scanner/smb/smb_ver\u2026 [truncated]")
+        mods = self.server._parse_msf_search(tx)
+        self.assertEqual(1, len(mods))                      # the partial row is dropped
+        self.assertEqual("normal", mods[0]["rank"])
+        self.assertTrue(all("truncated" not in m["rank"] for m in mods))
+
+    def test_non_metasploit_report_has_no_catalog(self):
+        h = self.server._render_report({
+            "schema_version": 1, "scanner": "nikto", "status": "success",
+            "source_type": "url", "target_ref": "x", "metadata": {},
+            "findings": [{"id": "3268", "Severity": "MEDIUM", "Title": "dir indexing"}]})
+        self.assertNotIn('class="hero msf-catalog"', h)
+
+
 if __name__ == "__main__":
     unittest.main()
