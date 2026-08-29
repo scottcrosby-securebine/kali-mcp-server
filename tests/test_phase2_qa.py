@@ -48,6 +48,12 @@ class ControlByteStripTests(unittest.TestCase):
         out = self.run_output("a\tb\nc\n")
         self.assertIn("a\tb", out)
 
+    def test_escape_split_secret_is_redacted_not_reassembled(self):
+        # red-team: a secret split by an injected ESC must be reassembled and
+        # redacted, never stripped back into plaintext (strip runs BEFORE redact).
+        out = self.run_output("token is Bea\x1b[0mrer SECRETLEAK123 here\n")
+        self.assertNotIn("SECRETLEAK123", out)
+
     def test_report_escape_strips_control_bytes(self):
         escaped = self.server._escape_report_data("x\x1b[31my\x07z")
         self.assertNotIn("\x1b", escaped)
@@ -148,6 +154,7 @@ class TargetHostPortTests(unittest.TestCase):
             ("127.0.0.1:8099", "443", "127.0.0.1:8099"),   # embedded port wins
             ("[::1]:80", "443", "[::1]:80"),
             ("::1", "443", "[::1]:443"),                    # bare IPv6 bracketed
+            ("2001:db8::1", "443", "[2001:db8::1]:443"),    # full bare IPv6 (red-team)
             ("https://host/path", "443", "host:443"),        # scheme + path dropped
             ("https://user:pass@host:8443/x", "443", "host:8443"),  # userinfo dropped
             ("host", "22", "host:22"),
