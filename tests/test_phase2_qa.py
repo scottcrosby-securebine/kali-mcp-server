@@ -91,15 +91,46 @@ class FalseSuccessDemotionTests(unittest.TestCase):
         self.assertTrue(out.startswith("❌"), out)
 
     def test_marker_matching_is_case_insensitive(self):
-        out = self.run_with(0, "ERROR: CONNECTION REFUSED by peer",
+        # whatweb's real error format, upper-cased.
+        out = self.run_with(0, "ERROR OPENING: http://x/ - Connection refused",
                             failure_markers=self.server._CONNECT_FAILURE_MARKERS)
         self.assertTrue(out.startswith("❌"), out)
 
     def test_discarding_alone_no_longer_over_demotes(self):
-        # "discarding" was dropped as a marker; a legit scan mentioning it stays ✅.
         out = self.run_with(0, "discarding duplicate finding for host",
                             failure_markers=self.server._CONNECT_FAILURE_MARKERS)
         self.assertTrue(out.startswith("✅"), out)
+
+    # Real captured failure lines (in-container) for the 5 wired tools.
+    def test_real_tool_failure_lines_demote(self):
+        cases = {
+            "whatweb": "ERROR Opening: http://127.0.0.1:1/ - Connection refused - connect(2)",
+            "wafw00f": "ERROR:wafw00f:Site 127.0.0.1 appears to be down",
+            "nikto": "+ [FAIL] Unable to connect to 127.0.0.1:1.",
+            "sslscan": "ERROR: Could not open a connection to host 127.0.0.1 (127.0.0.1) on port 1",
+            "sslyze": "   127.0.0.1:1  => ERROR: Server rejected the connection; discarding scan.",
+        }
+        for tool, line in cases.items():
+            with self.subTest(tool=tool):
+                out = self.run_with(0, line, failure_markers=self.server._CONNECT_FAILURE_MARKERS)
+                self.assertTrue(out.startswith("❌"), f"{tool}: {out}")
+
+    def test_target_content_echoing_failure_phrase_stays_success(self):
+        # RT2-B2: a target-controlled page title containing a failure phrase must
+        # NOT demote a genuinely successful whatweb scan (200 OK).
+        _, fake = _capture(returncode=0,
+                           stdout="http://host [200 OK] Title[Connection refused], Country[US]")
+        with patch.object(self.server, "execute_command", fake):
+            out = asyncio.run(self.server.whatweb_scan(target="http://host/"))
+        self.assertTrue(out.startswith("✅"), out)
+
+    def test_sslscan_usage_banner_is_failure(self):
+        # F8 guard: an exit-0 usage/help banner reads ❌.
+        _, fake = _capture(returncode=0,
+                           stdout="Usage: sslscan [Options] [host:port | host]\n  --help  Display the help text you are now reading")
+        with patch.object(self.server, "execute_command", fake):
+            out = asyncio.run(self.server.sslscan_scan(target="127.0.0.1"))
+        self.assertTrue(out.startswith("❌"), out)
 
 
 class TargetHostPortTests(unittest.TestCase):
