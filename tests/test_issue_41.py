@@ -243,5 +243,153 @@ class ExecLayerP1(unittest.TestCase):
         self.assertIn("No scored findings", report)
 
 
+class ConfidenceSeamP2(unittest.TestCase):
+    """Wave-2 P2: per-finding detection-confidence tiers, inverted allowlist model.
+    OBSERVED IS AN ALLOWLIST, never a default (doctrine valve-4 ruling): only a vetted
+    direct-target scanner renders Observed; everything else is inferred (CVE / package
+    scanner) or heuristic (the default). An unvetted scanner can never overclaim."""
+
+    def setUp(self):
+        self.server, _ = load_server()
+        if not hasattr(self.server, "_confidence"):
+            self.skipTest("_confidence absent on this revision")
+
+    def c(self, finding, scanner=""):
+        return self.server._confidence(finding, scanner)[0]
+
+    # --- inference tier ---
+    def test_cve_bearing_is_inferred(self):
+        self.assertEqual("inferred", self.c({"VulnerabilityID": "CVE-2021-44228"}))
+
+    def test_cve_beats_a_non_observed_scanner(self):
+        # A CVE finding from a non-unwitnessed scanner is inferred regardless of id.
+        self.assertEqual("inferred",
+                         self.c({"id": "x", "VulnerabilityID": "CVE-2021-44228"}, "ffuf"))
+
+    def test_trivy_ghsa_and_avd_are_inferred_not_observed(self):
+        # red-team B-OVERCLAIM: trivy findings whose advisory id is GHSA/AVD (not a
+        # CVE) are version matches, NOT live observations -> inferred, never observed.
+        for vid in ("GHSA-jf85-cpcp-j695", "AVD-AWS-0088"):
+            f = {"VulnerabilityID": vid, "Severity": "CRITICAL", "PkgName": "lodash"}
+            self.assertEqual("inferred", self.c(f, "trivy"), vid)
+
+    def test_trivy_cve_is_inferred(self):
+        self.assertEqual("inferred", self.c({"VulnerabilityID": "CVE-2021-23337"}, "trivy"))
+
+    # --- observed allowlist ---
+    def test_observed_requires_an_allowlisted_scanner(self):
+        # A TLS finding is Observed ONLY when the caller passes an allowlisted scanner;
+        # scanner-blind it defaults to heuristic (the inversion: no overclaim on
+        # unknown provenance).
+        f = {"id": "tls-proto-tls1_0", "Severity": "MEDIUM"}
+        self.assertEqual("observed", self.c(f, "testssl"))
+        self.assertEqual("observed", self.c(f, "sslscan"))
+        self.assertEqual("heuristic", self.c(f))          # no scanner -> default
+
+    def test_nuclei_non_cve_and_dns_and_direct_target_are_observed(self):
+        for scanner in ("nuclei", "dns_recon", "nbtscan", "smbclient"):
+            self.assertEqual("observed", self.c({"id": "x", "Severity": "INFO"}, scanner), scanner)
+
+    def test_nmap_open_port_is_observed_nse_is_heuristic(self):
+        port = {"id": "port-443-tcp", "state": "open", "service": "https", "Severity": "INFO"}
+        nse = {"id": "smb-vuln-ms17-010", "Severity": "HIGH", "evidence": "VULNERABLE"}
+        self.assertEqual("observed", self.c(port, "nmap"))
+        self.assertEqual("heuristic", self.c(nse, "nmap"))
+
+    # --- heuristic default ---
+    def test_unvetted_scanner_defaults_to_heuristic_never_observed(self):
+        # The core inversion invariant: a scanner NOT on any allowlist can never
+        # render Observed. A mutation making the final return "observed" is caught.
+        for scanner in ("whatweb", "ffuf", "gobuster", "wafw00f", "subfinder",
+                        "amass", "fierce", "syft", "olevba", "whois", "some-new-scanner", ""):
+            self.assertEqual("heuristic", self.c({"id": "x", "Severity": "INFO"}, scanner), scanner)
+
+    def test_whois_is_heuristic_not_observed(self):
+        # red-team F1: whois queries a registry on TCP 43 and never touches the
+        # target host, so it is not a direct-target observation -> heuristic.
+        self.assertEqual("heuristic", self.c({"id": "whois-registrar", "Severity": "INFO"}, "whois"))
+
+    def test_non_dict_finding_counts_toward_not_observed(self):
+        # red-team F2: a structureless finding renders Heuristic and must be counted,
+        # else the "not directly observed" disclosure over-reports observation.
+        report = _combined(self.server, [{
+            "schema_version": 1, "scanner": "customtool", "target_ref": "x",
+            "status": "success", "metadata": {},
+            "findings": ["a bare string finding",
+                         {"id": "y", "Severity": "INFO", "Title": "dict finding"}]}])
+        # both are heuristic (bare string + unvetted-scanner dict) -> 2 of 2
+        self.assertIn("2 of 2", report)
+
+    def test_nikto_and_metasploit_are_heuristic(self):
+        f = {"id": "3268", "Title": "dir indexing", "Severity": "MEDIUM"}
+        self.assertEqual("heuristic", self.c(f, "nikto"))
+        self.assertEqual("heuristic", self.c({"id": "m"}, "metasploit_search"))
+        self.assertEqual("heuristic", self.c({"id": "m"}, "metasploit_info"))
+
+    def test_metasploit_cve_in_query_stays_heuristic(self):
+        # red-team B1: a CVE named in a metasploit query lands in the id; unwitnessed
+        # runs before the CVE branch, so it stays heuristic (not a host attribution).
+        f = {"id": "metasploit_search-CVE-2021-44228", "Severity": "INFO"}
+        self.assertEqual("heuristic", self.c(f, "metasploit_search"))
+
+    def test_bare_string_finding_is_heuristic(self):
+        # A structureless finding has no provenance -> heuristic (conservative), even
+        # scanner-blind. Not Observed.
+        self.assertEqual("heuristic", self.c("bare string"))
+
+    def test_label_matches_key(self):
+        self.assertEqual(("inferred", "Inferred"),
+                         self.server._confidence({"VulnerabilityID": "CVE-2021-44228"}))
+
+    # --- render integration ---
+    def test_combined_report_renders_all_three_chips(self):
+        report = _combined(self.server, [
+            _result([{"VulnerabilityID": "CVE-2021-44228", "Severity": "CRITICAL", "Title": "log4shell"}], scanner="trivy"),
+            _result([{"id": "tls-proto-tls1_0", "Severity": "MEDIUM", "Title": "weak tls"}], scanner="testssl"),
+            _result([{"id": "3268", "Severity": "MEDIUM", "Title": "dir indexing"}], scanner="nikto")])
+        self.assertIn("conf-inferred", report)   # trivy CVE
+        self.assertIn("conf-observed", report)   # testssl
+        self.assertIn("conf-heuristic", report)  # nikto
+
+    def test_scope_box_not_observed_count_matches_scanner_aware_findings(self):
+        # PA5, inverted: the count uses the SAME scanner-aware verdict the render does.
+        results = [
+            _result([{"VulnerabilityID": "CVE-2021-44228", "Severity": "CRITICAL", "Title": "a"}], scanner="trivy"),   # inferred
+            _result([{"id": "3268", "Severity": "MEDIUM", "Title": "b"}], scanner="nikto"),                            # heuristic
+            _result([{"id": "tls-proto-tls1_0", "Severity": "MEDIUM", "Title": "c"}], scanner="testssl")]              # observed
+        report = _combined(self.server, results)
+        # 2 not-observed (trivy inferred + nikto heuristic) of 3
+        self.assertIn("Not directly observed", report)
+        self.assertIn("2 of 3", report)
+
+    def test_trivy_ghsa_critical_is_counted_not_observed_in_render(self):
+        # red-team B-OVERCLAIM end to end: a GHSA CRITICAL must NOT render Observed
+        # nor be excluded from the honesty count.
+        import re
+        report = _combined(self.server, [_result(
+            [{"VulnerabilityID": "GHSA-jf85-cpcp-j695", "Severity": "CRITICAL",
+              "PkgName": "lodash", "InstalledVersion": "4.17.20", "FixedVersion": "4.17.21",
+              "Title": "proto pollution"}], scanner="trivy")])
+        art = [a for a in re.findall(r"<article>.*?</article>", report, re.S) if "lodash" in a][0]
+        self.assertIn("conf-inferred", art)
+        self.assertNotIn("conf-observed", art)
+        self.assertIn("1 of 1", report)
+
+    def test_metasploit_cve_finding_renders_heuristic_chip_not_inferred(self):
+        # red-team B1 (chip path): the "_conf" stamp carries the scanner-aware
+        # heuristic verdict through render_findings' re-enrich; the chip is not the
+        # scanner-blind fallback.
+        import re
+        report = _combined(self.server, [_result(
+            [{"id": "metasploit_search-CVE-2021-44228", "Title": "exploit modules",
+              "Severity": "INFO"}], scanner="metasploit_search")])
+        art = [a for a in re.findall(r"<article>.*?</article>", report, re.S)
+               if "metasploit_search-CVE-2021-44228" in a][0]
+        self.assertIn("conf-heuristic", art)
+        self.assertNotIn("conf-inferred", art)
+        self.assertNotIn("_conf", art)           # private stamp must not leak
+
+
+
 if __name__ == "__main__":
     unittest.main()

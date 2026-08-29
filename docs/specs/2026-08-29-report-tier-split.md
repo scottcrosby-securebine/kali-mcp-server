@@ -11,9 +11,90 @@ unchanged (inline CSS + inline SVG + data-URI only, no JS).
   at the top of the combined report: scope/coverage box, a bold posture hero
   (aggregate contextual risk as a bullet graph + confidence qualifier), and
   traffic-light KRI tiles. Technical tiers below stay austere and unchanged.
-- **P2 — Per-finding confidence + detection-only posture.** Derive a per-finding
-  confidence tier (confirmed / probable / potential-unvalidated) from the signals,
-  render it in the per-finding block and the scope box's "N unvalidated".
+- **P2 — Per-finding confidence + detection-only posture. THIS PHASE.** Derive a
+  per-finding confidence tier and render it in the per-finding block and the scope
+  box. Vocabulary (Scott, 2026-08-29): **Observed / Inferred / Heuristic** — the
+  honest set for a detection-only, unauthenticated scan where nothing is
+  exploit-validated. "Confirmed" is rejected: it reads as exploit-proven, which an
+  unauthenticated remote scan cannot claim (honesty anchor RB2/RB4).
+    - **Observed** — a scanner on the **Observed allowlist** actively confirmed the
+      condition by probing the target: TLS negotiated (testssl/sslscan/sslyze), a
+      resolved record (dns_recon), a fired nuclei template matched to a live response,
+      a fact retrieved directly from the host (nbtscan/smbclient connect to it), or an nmap
+      open-port finding. Observed is an ALLOWLIST, never a default (doctrine valve-4
+      ruling): a scanner not on it never renders Observed.
+    - **Inferred** — a CVE, or a **package/advisory scanner** (`_INFERENCE_SCANNERS`:
+      trivy) attributing a vuln by installed version, not exploitation-validated. Any
+      CVE-bearing finding, and every trivy finding (its GHSA/AVD advisories are
+      version matches too, not live observations — red-team B-OVERCLAIM).
+    - **Heuristic** — the **default**: a discovery/fingerprint guess (`web-path`,
+      `web-tech`, `waf`, `subdomain`), a signature match (nikto, an nmap NSE vuln
+      script), a local-DB lookup (metasploit), whois (a registry query on TCP 43 that never
+      touches the host, red-team F1 — note dns_recon stays Observed because its finding IS the live record it resolved, whereas whois returns registry bookkeeping about the domain, red-team R9-N1), or **any scanner not on the Observed
+      allowlist and not an inference scanner**. An unvetted or new scanner lands here,
+      so it can never overclaim Observed.
+
+## P2 acceptance criteria
+
+- **PA1 Derivation (Observed is an ALLOWLIST).** `_confidence(finding, scanner="")`
+  returns `(key, label)`, derived in that precedence: an **unwitnessed scanner**
+  (`_UNWITNESSED_SCANNERS`: nikto, metasploit) → heuristic FIRST, before the CVE
+  check, so a CVE named in a metasploit query is not read as a host attribution
+  (red-team B1); else a **CVE** → inferred; else an **inference scanner**
+  (`_INFERENCE_SCANNERS`: trivy) → inferred (its GHSA/AVD advisories are version
+  matches, not live observations — red-team B-OVERCLAIM); else **nmap** split by
+  finding shape (an open-port finding → observed, an NSE vuln-script hit → heuristic);
+  else a scanner on the **Observed allowlist** (`_OBSERVED_SCANNERS`: testssl,
+  sslscan, sslyze, nuclei, dns_recon, nbtscan, smbclient) → observed; else
+  **heuristic (the default)**. The organizing principle, and the doctrine valve-4
+  ruling (Scott, 2026-08-29): **Observed is an allowlist, never a default** — only a
+  scanner vetted as a direct live-target confirmation renders Observed, so a new or
+  unvetted scanner (and any discovery/signature/DB finding) defaults to heuristic and
+  can never overclaim. This closes the overclaim CLASS (nikto, nmap-NSE, metasploit,
+  trivy-GHSA were four instances of the same "unvetted scanner defaults to Observed"
+  bug) rather than point-patching each. A conservative underclaim (a real observation
+  rendered heuristic — e.g. a testssl-confirmed heartbleed carrying a CVE renders
+  Inferred, or an smbclient bare string) is accepted; an overclaim is the failure the
+  allowlist prevents. No new signal is invented; it reads fields the finding already carries, plus the scanner
+  name the combined loop already holds. Callers that know the scanner (the combined
+  per-scanner loop, the single-result path) compute the verdict and **stamp it on the
+  finding under a private `_conf` key**. The stamp is read by `confidence_chip` and
+  survives the redundant `_enrich_finding` re-copy inside the shared `render_findings`
+  (which does `dict(finding)`, copying `_conf` forward), so a scanner-DEPENDENT verdict
+  is not lost when a CVE-bearing finding is re-copied — the bug an `id()`-keyed side map
+  hit once the unwitnessed override became CVE-reachable (red-team B1). `slots()` skips
+  the `_conf` key so it never reaches the evidence table.
+- **PA2 Per-finding render.** Every per-finding article (fix-first work units, CVE
+  units, hardening, appendix, and the single-result path that shares
+  `render_findings`) carries a confidence chip beside its severity, colour + word
+  (never colour alone), theme-aware via existing tokens.
+- **PA3 Scope-box disclosure.** The scope/coverage box gains one cell: the count of
+  findings **not directly observed** (inferred + heuristic) out of the total — the
+  honesty disclosure that stops a version-inferred CVE from reading as a confirmed
+  breach.
+- **PA4 Methodology.** The methodology / risk-model prose names the three tiers and
+  what each means, so the label is auditable, not decorative.
+- **PA5 Numbers match.** The scope-box not-observed count equals the number of
+  findings whose confidence is inferred or heuristic (`_confidence` over the deduped
+  finding set) — one value per fact (research FIX-D). NB it counts findings, not
+  chips: a Trivy package upgrade unit renders one chip for its N CVE members, so
+  chip-count and finding-count differ by design; the disclosure counts findings.
+- **PA6 Scriptless + a11y + print + scope untouched.** CSP unchanged; chips are
+  text + token colour with a print-legible palette and `break-inside` respected;
+  every existing section keeps its content and order (A6 carried from P1).
+
+### Seams (P2)
+
+- `_confidence` teaching cases (inverted allowlist): a CVE finding → inferred; a
+  trivy GHSA finding (no CVE) → inferred; a `testssl` finding → observed; a nuclei
+  non-CVE finding → observed; an nmap open-port finding → observed while an nmap NSE
+  vuln-script finding → heuristic; any nikto/metasploit finding → heuristic; an
+  **unvetted/unknown scanner → heuristic** (never Observed); a metasploit query
+  naming a CVE → heuristic (unwitnessed beats CVE, B1). A mutation-relevant assertion
+  pins that an unvetted scanner defaults to heuristic, not observed.
+- render test: a combined report of ungrouped findings (one article each) renders
+  `Inferred`/`Observed`/`Heuristic` chips; the scope box's not-observed count equals
+  `sum(_confidence(f) != observed)` over the finding set (PA5).
 - **P3 — Per-type heroes.** Each single-scanner report leads with its own
   verdict/grade hero (TLS letter grade, macro verdict banner, risk band), austere
   body below. Metasploit strip-chrome reference card.
