@@ -98,6 +98,51 @@ unchanged (inline CSS + inline SVG + data-URI only, no JS).
 - **P3 — Per-type heroes.** Each single-scanner report leads with its own
   verdict/grade hero (TLS letter grade, macro verdict banner, risk band), austere
   body below. Metasploit strip-chrome reference card.
+
+### P3a — TLS letter-grade hero (THIS SUB-PHASE)
+
+The single-scanner TLS report (testssl/sslscan/sslyze) leads its exec summary with
+a bold SSL-Labs-style **letter grade hero**, grade drivers, and a coverage qualifier.
+Honesty anchor (carried from P2): the grade is a CEILING computed DOWNWARD from
+weaknesses the scanner ACTUALLY OBSERVED; it never asserts a top grade on a scanner's
+silence, and is never "A+".
+
+- **QA1 Grade rubric (F14).** `_tls_grade(findings, scanner)` → `(grade, drivers,
+  coverage)`, worst cap wins: catastrophic break (Heartbleed/ROBOT/DROWN/SSLv2) → **F**;
+  SSLv3 / POODLE → **C**; a weak cipher (RC4/3DES/DES/NULL/EXPORT/MD5) or legacy
+  TLS 1.0/1.1 → **B**; nothing observed → **A**. Grades read from the finding fields
+  already captured across all three scanners: sslscan/sslyze use `tls-proto-*`/
+  `tls-cipher-*` ids; testssl uses its own named ids (TLS1/TLS1_1 legacy protocols,
+  RC4/SWEET32 weak ciphers, FREAK/LOGJAM/DROWN/heartbleed/POODLE named vulns) + `cve`.
+  Only a coloured-severity finding caps (a testssl "not offered" OK row must not), and
+  the fine testssl ids TLS1_2/TLS1_3 must not false-cap. A **CRITICAL-severity
+  backstop** sends any weakness the specific caps did not name (a future testssl
+  vuln, a NULL cipher, a critically-broken cert) to F, so an unrecognised critical
+  never grades A; testssl weak-cipher LISTS (`cipherlist_*`) cap at B. The named-vuln
+  allowlist covers testssl's vuln batch: renegotiation (`renego`, CVE-2009-3555) → F,
+  CRIME/compression → C, BREACH/BEAST/LUCKY13 → B (Scott ruled allowlist over inversion at
+  the valve-4 stop, 2026-08-29). No invented signal.
+- **QA2 Coverage honesty.** The coverage note names the scanner and states the grade
+  reflects only what was tested. testssl runs `--severity HIGH`, so its JSON never
+  carries the LOW/MEDIUM tier (legacy TLS 1.0/1.1, SWEET32); it therefore CANNOT
+  certify A and a clean testssl grade is **capped at B** with a coverage-limit driver
+  (red-team R6-B1). sslscan/sslyze emit protocols/ciphers at any severity so a clean
+  scan honestly grades A, but their note does NOT claim vuln coverage they did not
+  perform. Never "A+" (HSTS + full assessment not verified).
+- **QA3 Hero render.** A TLS report's exec summary opens with `.tls-hero`: the grade
+  letter (colour-banded A green→F red via the existing `band-*` tokens), the grade
+  drivers, and the coverage `meta` note. A non-TLS report shows no grade hero.
+- **QA4 Scriptless + a11y + scope.** Inline HTML + token colour, CSP unchanged, the
+  grade word/letter always present (never colour alone); every existing single-report
+  section keeps content and order; the combined report is untouched.
+
+### Seams (P3a)
+
+- `_tls_grade` teaching cases: heartbleed/ROBOT/SSLv2 → F; SSLv3/POODLE → C; weak
+  cipher / legacy TLS1.0-1.1 → B; clean → A + coverage note (no "A+"); worst-cap-wins
+  (F beats B); sparse-scanner coverage note omits "named vulnerabilities".
+- render test: a testssl report shows the `tls-hero` with the grade letter and the
+  "ceiling on posture" qualifier; a nikto report shows no hero.
 - **P4 — Mappings + evidence + SLA** (the old epic M3/M4/M5): CWE→ATT&CK/NIST,
   evidence blocks, auto SLA/benchmark from band.
 

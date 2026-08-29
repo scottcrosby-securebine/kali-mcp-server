@@ -391,5 +391,169 @@ class ConfidenceSeamP2(unittest.TestCase):
 
 
 
+class TlsGradeHeroP3a(unittest.TestCase):
+    """Wave-2 P3a: SSL-Labs-style TLS letter-grade hero, computed downward from
+    observed weaknesses and never overclaiming a top grade on a scanner's silence."""
+
+    def setUp(self):
+        self.server, _ = load_server()
+        if not hasattr(self.server, "_tls_grade"):
+            self.skipTest("_tls_grade absent on this revision")
+
+    def g(self, findings, scanner="testssl"):
+        return self.server._tls_grade(findings, scanner)[0]
+
+    def test_catastrophic_break_is_F(self):
+        for f in ({"id": "heartbleed", "cve": "CVE-2014-0160", "Severity": "CRITICAL"},
+                  {"id": "ROBOT", "Severity": "HIGH"},
+                  {"id": "tls-proto-sslv2", "Severity": "HIGH", "Title": "Weak protocol enabled: SSLv2"}):
+            self.assertEqual("F", self.g([f]), f)
+
+    def test_sslv3_poodle_is_C(self):
+        self.assertEqual("C", self.g([{"id": "tls-proto-sslv3", "Severity": "HIGH",
+                                       "Title": "Weak protocol enabled: SSLv3"}]))
+
+    def test_weak_cipher_is_B(self):
+        self.assertEqual("B", self.g([{"id": "tls-cipher-RC4-MD5", "Severity": "HIGH",
+                                       "Title": "Accepted cipher: RC4-MD5"}]))
+
+    def test_legacy_protocol_is_B(self):
+        self.assertEqual("B", self.g([{"id": "tls-proto-tlsv1.0", "Severity": "MEDIUM",
+                                       "Title": "Weak protocol enabled: TLSv1.0"}]))
+
+    def test_sslscan_clean_is_A(self):
+        # sslscan/sslyze emit weak protocols/ciphers at ANY severity, so a clean scan
+        # honestly grades A (no protocol/cipher weakness). testssl cannot (see below).
+        grade, drivers, coverage = self.server._tls_grade([], "sslscan")
+        self.assertEqual("A", grade)
+        self.assertEqual([], drivers)
+        self.assertIn("not an exhaustive SSL Labs assessment", coverage)
+
+    def test_testssl_clean_is_B_coverage_capped(self):
+        # red-team R6-B1: testssl runs --severity HIGH, so its JSON never carries the
+        # LOW/MEDIUM tier (legacy TLS 1.0/1.1, SWEET32). It cannot certify A; a clean
+        # testssl scan caps at B with a coverage-limit driver, never a false green A.
+        grade, drivers, coverage = self.server._tls_grade([], "testssl")
+        self.assertEqual("B", grade)
+        self.assertIn("--severity HIGH", drivers[0])
+        self.assertIn("does NOT surface LOW/MEDIUM", coverage)
+
+    def test_testssl_negative_rows_do_not_cap_a_clean_server(self):
+        # red-team B1: testssl emits "not offered"/"not vulnerable" rows (severity
+        # OK->INFO) whose ids contain sslv2/heartbleed/etc. Only a COLOURED-severity
+        # weakness may cap; a clean server must grade A, not F.
+        clean = [
+            {"id": "SSLv2", "Severity": "INFO", "Title": "SSLv2: not offered (OK)"},
+            {"id": "heartbleed", "Severity": "INFO", "Title": "Heartbleed: not vulnerable (OK)"},
+            {"id": "POODLE_SSL", "Severity": "INFO", "Title": "POODLE, SSL: not vulnerable (OK)"}]
+        # negative rows must NOT cap to F; the residual testssl grade is the B coverage
+        # cap (--severity HIGH), never F from a matched "not vulnerable" row.
+        grade, drivers, _ = self.server._tls_grade(clean, "testssl")
+        self.assertNotEqual("F", grade)
+        self.assertEqual("B", grade)
+        self.assertIn("--severity HIGH", drivers[0])
+
+    def test_sslyze_legacy_tls_strong_cipher_is_B_not_A(self):
+        # red-team B2: sslyze emits a tls-cipher-* finding titled "TLSv1.0 accepted
+        # cipher" at MEDIUM for a strong cipher over a legacy protocol. The legacy
+        # cap must fire off the TITLE, not a tls-proto id sslyze never emits.
+        f = {"id": "tls-cipher-ECDHE-RSA-AES128-SHA", "Severity": "MEDIUM",
+             "Title": "TLSv1.0 accepted cipher: ECDHE-RSA-AES128-SHA"}
+        self.assertEqual("B", self.g([f], "sslyze"))
+
+    def test_testssl_named_ids_are_graded(self):
+        # red-team R2-F1 + Standards R2-S1: testssl uses its OWN id scheme (TLS1,
+        # TLS1_1, RC4, FREAK...) not the tls-proto/tls-cipher prefixes. The caps must
+        # read them, and must NOT false-cap the fine TLS1_2/TLS1_3 ids.
+        self.assertEqual("B", self.g([{"id": "TLS1", "Severity": "LOW", "Title": "TLS1"}], "testssl"))
+        self.assertEqual("B", self.g([{"id": "TLS1_1", "Severity": "LOW", "Title": "TLS1_1"}], "testssl"))
+        self.assertEqual("B", self.g([{"id": "RC4", "Severity": "HIGH", "Title": "RC4"}], "testssl"))
+        self.assertEqual("F", self.g([{"id": "FREAK", "Severity": "HIGH", "Title": "FREAK"}], "testssl"))
+        # fine protocols must not hit the LEGACY weakness cap (TLS1 is a substring of
+        # TLS1_2 — boundary guard). Under testssl the clean grade is B via the coverage
+        # cap, so prove no false weakness-cap by the DRIVER, not the letter.
+        _, drivers12, _ = self.server._tls_grade([{"id": "TLS1_2", "Severity": "LOW", "Title": "TLS1_2"}], "testssl")
+        self.assertNotIn("legacy TLS 1.0/1.1 enabled", drivers12)   # not a weakness cap
+        self.assertIn("--severity HIGH", drivers12[0])              # the coverage cap
+        # TLS1_2 exact-id must not be in the legacy weakness set
+        self.assertNotIn("tls1_2", self.server._TLS_B_LEGACY_IDS)
+        self.assertIn("tls1", self.server._TLS_B_LEGACY_IDS)
+
+    def test_critical_backstop_and_ccs_winshock_are_F(self):
+        # red-team R3-F1: CCS/Winshock are CRITICAL testssl vulns that used to grade A.
+        # Named tokens catch them, and a severity backstop catches any UNRECOGNISED
+        # critical weakness so a future testssl vuln can never grade A.
+        self.assertEqual("F", self.g([{"id": "CCS", "cve": "CVE-2014-0224", "Severity": "CRITICAL"}], "testssl"))
+        self.assertEqual("F", self.g([{"id": "winshock", "cve": "CVE-2014-6321", "Severity": "CRITICAL"}], "testssl"))
+        self.assertEqual("F", self.g([{"id": "SOME_FUTURE_VULN", "Severity": "CRITICAL",
+                                       "Title": "unknown critical break"}], "testssl"))
+
+    def test_testssl_cipherlist_weak_lists_cap(self):
+        # Standards R3-S1: testssl reports accepted weak-cipher LISTS as cipherlist_*
+        # ids. A coloured one is a bad list -> at least B; a CRITICAL NULL list -> F.
+        self.assertEqual("F", self.g([{"id": "cipherlist_NULL", "Severity": "CRITICAL",
+                                       "Title": "NULL ciphers offered"}], "testssl"))
+        self.assertEqual("B", self.g([{"id": "cipherlist_LOW", "Severity": "MEDIUM"}], "testssl"))
+        self.assertEqual("B", self.g([{"id": "cipherlist_EXPORT", "Severity": "HIGH"}], "testssl"))
+        # a strong-cipher list is rated OK->INFO and gated out -> no WEAKNESS cap;
+        # the residual testssl grade is the B coverage cap, not a weak-cipher B.
+        grade, drivers, _ = self.server._tls_grade([{"id": "cipherlist_strongFS", "Severity": "INFO"}], "testssl")
+        self.assertEqual("B", grade)
+        self.assertIn("--severity HIGH", drivers[0])
+
+    def test_renegotiation_crime_and_compression_families_cap(self):
+        # red-team R4-F1 (Scott ruling: extend the allowlist): HIGH testssl weaknesses
+        # in the renegotiation/compression families used to grade A. Now capped.
+        self.assertEqual("F", self.g([{"id": "secure_renego", "cve": "CVE-2009-3555",
+                                       "Severity": "HIGH", "Title": "Insecure renegotiation"}], "testssl"))
+        self.assertEqual("C", self.g([{"id": "CRIME_TLS", "Severity": "HIGH", "Title": "CRIME, TLS"}], "testssl"))
+        for vid in ("BREACH", "BEAST", "LUCKY13"):
+            self.assertEqual("B", self.g([{"id": vid, "Severity": "MEDIUM", "Title": vid}], "testssl"), vid)
+
+    def test_ccs_token_does_not_false_match_success(self):
+        # Standards R4-S1: the bare "ccs" token was dropped (it substring-collides with
+        # "success"); a coloured finding whose text contains "success" must NOT grade F.
+        f = {"id": "some_check", "Severity": "MEDIUM", "Title": "handshake completed successfully"}
+        self.assertNotEqual("F", self.g([f], "testssl"))
+        # CCS is still F via its CVE / the CRITICAL backstop
+        self.assertEqual("F", self.g([{"id": "CCS", "cve": "CVE-2014-0224", "Severity": "HIGH"}], "testssl"))
+
+    def test_worst_cap_wins(self):
+        # A catastrophic break plus a weak cipher grades F, not B.
+        findings = [{"id": "tls-cipher-RC4-MD5", "Severity": "HIGH"},
+                    {"id": "heartbleed", "cve": "CVE-2014-0160", "Severity": "CRITICAL"}]
+        self.assertEqual("F", self.g(findings))
+
+    def test_sparse_scanner_coverage_note_is_narrower(self):
+        # sslscan tests protocols+ciphers only; the coverage note must say so and
+        # NOT claim named-vuln coverage it did not perform.
+        _, _, cov = self.server._tls_grade([], "sslscan")
+        self.assertIn("weak protocols and accepted ciphers", cov)
+        self.assertNotIn("named vulnerabilities", cov)
+
+    def test_render_shows_grade_hero_for_tls_report(self):
+        report = self.server._render_report({
+            "schema_version": 1, "scanner": "testssl", "status": "success",
+            "source_type": "url", "target_ref": "example.com", "metadata": {},
+            "findings": [{"id": "tls-proto-sslv3", "Severity": "HIGH",
+                          "Title": "Weak protocol enabled: SSLv3"}]})
+        self.assertIn("tls-hero", report)
+        self.assertIn("TLS grade", report)
+        self.assertIn(">C<", report)                       # the graded letter
+        self.assertIn("ceiling on posture", report)        # honesty qualifier
+        # R8: the coverage note's QA2 tail must SURVIVE render (a 400-char escape() cap
+        # used to sever it). Assert the last clause is present and not truncated.
+        self.assertIn("verified A+", report)
+        self.assertNotIn("[truncated]", report)
+        self.assertNotIn("<script", report)
+
+    def test_non_tls_report_has_no_grade_hero(self):
+        report = self.server._render_report({
+            "schema_version": 1, "scanner": "nikto", "status": "success",
+            "source_type": "url", "target_ref": "example.com", "metadata": {},
+            "findings": [{"id": "3268", "Severity": "MEDIUM", "Title": "dir indexing"}]})
+        self.assertNotIn("tls-hero", report)
+
+
 if __name__ == "__main__":
     unittest.main()
