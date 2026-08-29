@@ -182,16 +182,35 @@ to complete the Phase-1 correctness lane (ROADMAP rows 5, 12).
   carries none) is what keeps a multi-pair line safe: `host: X  login: Y  password: Z`
   matches only at `password`, and the anchored-prefix variant that leaked keys deeper
   than 64 chars (red-team round 2 F1) was discarded for this keyword-anywhere form.
-  This closes the compound-key CLASS (not an enumerated shape list) and aligns flat
-  redaction with the structured dict-key guard, which already redacts `{"token_count": ...}`. **Consequence, stated honestly:** a benign key whose token
-  contains a secret keyword (e.g. `token_count=5`, `secret_keys=0`) now redacts on flat
-  text too -- this is the structured path's long-standing behaviour, not a new policy,
-  and the `redaction_differential` sweep destroys 0 content the real scanner corpus
-  keeps (exit 0 vs base `1dc23f7`). A key with no secret keyword (`content_length`,
-  `retry_count`, `access_key_id` -- a public id, no `secret`/`api_key` substring) is
-  untouched. ReDoS-safe: the suffix run is bounded ({0,64}) and the value arm is
-  the existing opener-guarded `[^\r\n]` star (red-team timing: linear, 176 KB -> 142 ms).
-  **AC:** MUST_REMOVE (the compound-key class incl. SECRET_KEY_BASE / secret_id /
-  secret_hash / api_key_prefix + adjacency regressions) all redact; MUST_KEEP
-  (no-keyword keys) all intact. **Seam:** CompoundKeyRedactionTests; redaction_differential.
-  **Scope:** flat text path only; #84 stays track-only (upstream transport).
+  This closes the common compound-key shapes (aws_secret_access_key, SECRET_KEY_BASE,
+  secret_id) that the flat path previously leaked. A key with no secret keyword
+  (`content_length`, `retry_count`, `access_key_id` -- a public id, no `secret`/`api_key`
+  substring) is untouched. ReDoS-safe: the suffix run is bounded ({0,64}) and the value
+  arm is the existing opener-guarded `[^\r\n]` star (red-team timing: linear, 176 KB ->
+  142 ms).
+
+  **This is fail-safe over-redaction, NOT precise field redaction (Scott's ruling,
+  2026-08-30).** Three red-team rounds established that a flat regex cannot both close
+  the leak and avoid over-redacting benign lines; the accepted direction is fail-safe
+  (destroy benign content, never leak a secret). Known, accepted limitations:
+  - **Over-redaction of benign keyword-bearing keys.** A benign key whose token contains
+    a secret keyword (`token_count=5`, `secret_keys=0`) redacts its value on flat text.
+    Worse than the structured dict path on a MULTI-PAIR line: `token_bucket_size=1000
+    region=us tier=gold` redacts the whole tail (`region`/`tier` lost), where the dict
+    path keeps them as separate keys (red-team round 3 B1). Content loss, never a leak.
+  - **64-char suffix ceiling (residual leak, pre-existing).** A key whose only keyword sits
+    >64 chars before the separator (`secret_<70 chars>=X`) still leaks. base `1dc23f7` is
+    adjacency-only so it leaks every non-adjacent compound key; this is NOT a regression,
+    and the class is therefore NOT fully closed (round 3 N1).
+  - **Keyword-alternation gaps (pre-existing).** `pwd`/`passphrase`/`credential(s)` are not
+    in `_SECRET_KEYWORD_ALT`, so `MYSQL_PWD=`, `passphrase=`, `credentials=` leak on base
+    and HEAD alike (round 3 N2). Untouched by this change.
+
+  The dict-key guard (`SECRET_KEY.search`) is the real defense for structured JSON `/results`
+  and the HTML report; the flat path is best-effort last-hop hardening only.
+  **AC:** MUST_REMOVE (the common compound shapes incl. SECRET_KEY_BASE / secret_id /
+  secret_hash / api_key_prefix + long-prefix + adjacency regressions) all redact; MUST_KEEP
+  (no-keyword keys) all intact. **Seam:** CompoundKeyRedactionTests; redaction_differential
+  (exit 0 vs base `1dc23f7` -- but its sweep corpus does not exercise the B1 multi-pair
+  shape, so green is not proof against that class). **Scope:** flat text path only; #84
+  stays track-only (upstream transport).
