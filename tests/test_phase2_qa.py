@@ -79,6 +79,17 @@ class ControlByteStripTests(unittest.TestCase):
         self.assertNotIn("SECRETLEAK123",
                          self.server._redact_scanner_data("pass\u200bword: SECRETLEAK123"))
 
+    def test_nikto_pattern_no_quadratic_redos(self):
+        # red-team: an unbounded gap before 'contents' made SECRET_VALUE_PATTERNS'
+        # nikto rule O(n^2) on target-reflected content (many quoted secret keywords,
+        # no colon). The gap is bounded {0,120} now -> linear. A 200KB pathological
+        # input finished in ~19s before the bound, ~0.2s after; 2s guards regression.
+        import time
+        payload = "'token' " * (200 * 1024 // 8)
+        start = time.time()
+        self.server._redact_scanner_data(payload)
+        self.assertLess(time.time() - start, 2.0, "nikto pattern went quadratic again")
+
     def test_whitespace_separator_folded_not_deleted(self):
         # red-team B1: a keyword/value separator that is NBSP/NEL/a C0-C1 control /
         # a unicode space must be FOLDED to a space, not deleted -- deleting it fused
