@@ -85,13 +85,17 @@ class ControlByteStripTests(unittest.TestCase):
         # no colon). The gap is bounded {0,120} now -> linear. A 200KB pathological
         # input finished in ~19s before the bound, ~0.2s after; 2s guards regression.
         import time
-        # Two O(n^2) sources lived in this one pattern: the name->contents gap AND
-        # the quoted-name spans. Exercise BOTH -- the many-quotes shape (closing
-        # quote every 8 chars) and the unterminated-quote / keyword-dense shape
-        # (the one that pins the quoted-name span). Both must be linear.
+        # Two O(n^2) sources lived in this one pattern; each shape pins a different
+        # bound, and each is sized so the UNBOUNDED version blows past 2s (verified
+        # by reverting each bound: many-quotes/200KB -> ~19s on an unbounded gap;
+        # unterminated/820KB -> ~13s on unbounded quoted-name spans), while the
+        # bounded version stays <1s. Undersizing is why the first cut of this test
+        # passed on the vulnerable code (green-gate-is-not-a-proving-gate).
+        #   many-quotes (closing quote every 8 chars) pins the name->contents gap {0,120}
+        #   unterminated / keyword-dense pins the quoted-name spans {0,200}
         for label, payload in (
-            ("many quotes", "'token' " * (200 * 1024 // 8)),
-            ("unterminated quote", "'" + "authorization" * (200 * 1024 // 13)),
+            ("gap {0,120}", "'token' " * (200 * 1024 // 8)),
+            ("span {0,200}", "'" + "authorization" * (820 * 1024 // 13)),
         ):
             with self.subTest(shape=label):
                 start = time.time()
