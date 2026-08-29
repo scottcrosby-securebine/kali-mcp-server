@@ -116,13 +116,15 @@ class FalseSuccessDemotionTests(unittest.TestCase):
                 self.assertTrue(out.startswith("❌"), f"{tool}: {out}")
 
     def test_target_content_echoing_failure_phrase_stays_success(self):
-        # RT2-B2: a target-controlled page title containing a failure phrase must
-        # NOT demote a genuinely successful whatweb scan (200 OK).
-        _, fake = _capture(returncode=0,
-                           stdout="http://host [200 OK] Title[Connection refused], Country[US]")
-        with patch.object(self.server, "execute_command", fake):
-            out = asyncio.run(self.server.whatweb_scan(target="http://host/"))
-        self.assertTrue(out.startswith("✅"), out)
+        # RT2-B2 / RT3-B1: target-controlled page titles echoing a failure phrase
+        # OR the tool's own error prefix must NOT demote a successful (200 OK) scan.
+        for title in ("Connection refused", "ERROR Opening", "usage: help"):
+            with self.subTest(title=title):
+                _, fake = _capture(returncode=0,
+                                   stdout=f"http://host [200 OK] Title[{title}], Country[US]")
+                with patch.object(self.server, "execute_command", fake):
+                    out = asyncio.run(self.server.whatweb_scan(target="http://host/"))
+                self.assertTrue(out.startswith("✅"), out)
 
     def test_sslscan_usage_banner_is_failure(self):
         # F8 guard: an exit-0 usage/help banner reads ❌.
