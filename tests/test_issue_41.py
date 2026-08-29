@@ -161,6 +161,13 @@ class ContextualRiskSeam(unittest.TestCase):
         self.assertEqual("Medium", self.server._risk_band_word(r["score"]))
         self.assertIn("exploit-unknown", r["assumed"])
 
+    def test_weights_are_pinned_by_an_asymmetric_case(self):
+        # #86 N5: the teaching cases use exploit==exposure, so a 0.52<->0.48 swap
+        # passes them. This asymmetric case (exploit 1.0, exposure 0.5) pins which
+        # weight is which: 100*(0.52*1.0 + 0.48*0.5) = 76; a swap yields 74.
+        f = {"Severity": "CRITICAL", "KEV": "Actively exploited — now"}
+        self.assertEqual(76, self.server._contextual_risk(f, 0.5)["score"])
+
     def test_teaching_invariant_facing_7_5_outranks_internal_9_8(self):
         facing = {"Severity": "HIGH", "KEV": "Actively exploited — now", "CVSS": {"nvd": {"V3Score": 7.5}}}
         internal = {"Severity": "CRITICAL", "KEV": "Unknown — not enriched",
