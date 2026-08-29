@@ -294,5 +294,49 @@ class NmapHostTimeoutTests(unittest.TestCase):
         self.assertLess(int(value[:-1]), self.server.TIMEOUT_LONG)
 
 
+class PemRedosTests(unittest.TestCase):
+    """#96: the PEM private-key redaction pattern must be linear on unpaired openers."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    def test_unpaired_pem_openers_stay_linear(self):
+        import time
+        # unbounded [\s\S]*? was O(n^2): 4000 openers ~2s, growing. Bounded {0,20000}
+        # -> linear. 8000 openers must finish well under the guard.
+        payload = "-----BEGIN PRIVATE KEY-----\n" * 8000
+        start = time.time()
+        self.server._redact_scanner_data(payload)
+        self.assertLess(time.time() - start, 2.5, "PEM pattern went quadratic")
+
+    def test_real_key_still_redacted(self):
+        key = ("-----BEGIN PRIVATE KEY-----\n" + "MIIBVAIBADANBg" * 40
+               + "\n-----END PRIVATE KEY-----")
+        self.assertNotIn("MIIBVAIBADANBg", self.server._redact_scanner_data(key))
+
+
+class SslDashTargetGuardTests(unittest.TestCase):
+    """#97: SSL wrappers must reject a dash-flag target before it becomes a tool argv."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    def test_dash_target_rejected(self):
+        for fn in ("sslscan_scan", "sslyze_scan", "testssl_scan"):
+            with self.subTest(tool=fn):
+                out = asyncio.run(getattr(self.server, fn)(target="--xml=/tmp/x"))
+                self.assertTrue(out.startswith("❌"), out)
+                self.assertIn("must not begin with", out)
+
+    def test_normal_target_not_rejected(self):
+        # a legitimate host must still reach the tool (execute_command mocked)
+        calls, fake = _capture(stdout="Testing SSL")
+        with patch.object(self.server, "execute_command", fake):
+            out = asyncio.run(self.server.sslyze_scan(target="example.com"))
+        self.assertTrue(calls, "guard wrongly rejected a normal target")
+
+
 if __name__ == "__main__":
     unittest.main()
