@@ -331,6 +331,45 @@ later — their data shapes differ.
 - **P4 — Mappings + evidence + SLA** (the old epic M3/M4/M5): CWE→ATT&CK/NIST,
   evidence blocks, auto SLA/benchmark from band.
 
+### P4 — Auto remediation SLA from band (THIS SUB-PHASE)
+
+Scope RULING (concrete default): P4 ships **M5 — the auto remediation SLA/benchmark
+from severity band** in the combined report's exec layer. **M3 (CWE→ATT&CK/NIST) is
+DEFERRED**: findings do not currently carry a CWE id (only trivy has `CweIDs`, unsurfaced),
+so a CWE mapping would be low-signal and needs CWE surfaced first. **M4 (evidence blocks)
+is COVERED** by the existing per-finding evidence table (`slots()` + the Evidence section).
+
+- **SLA1 Benchmark helper.** `_SLA_DAYS = {CRITICAL:15, HIGH:30, MEDIUM:90, LOW:180}` — a
+  common severity-based vulnerability-management SLA pattern. No SLA for INFO/UNKNOWN. The
+  window is an ILLUSTRATIVE policy TARGET, never a measured deadline or a compliance
+  guarantee (RB2/RB4).
+- **SLA2 Exec render.** The combined exec layer gains a `.sla` block: a table with one row
+  per COLOURED severity that has REMEDIATION WORK UNITS (fix-queue items counted by their
+  top severity, NOT every finding by `agg_severity`): a coloured hardening finding that
+  never becomes a work unit must not get an SLA row, or the SLA would assert a remediation
+  target in the same exec layer that says "No remediable findings" (red-team B1). Showing the severity, the
+  open count, and the target window framed as a TARGET (e.g. "15-day target"); the block
+  heading and the note both carry "illustrative benchmark" so a skimmed/screenshotted
+  table is not read as a committed deadline (red-team N1). Window values come from
+  `_remediation_sla` (single source of truth) and the note's window list is interpolated
+  from it, so the prose cannot drift from the table (Standards F1/F2). Bands with no open
+  findings are omitted (never invent an SLA for an empty tier). An honesty note states the
+  windows are an illustrative benchmark for prioritisation, NOT a measured deadline or a
+  compliance guarantee, and that KEV/regulatory due dates override.
+- **SLA3 Honesty + a11y + scope.** Scriptless inline HTML, severity word always present
+  (never colour alone, reuse `.sev sev-*`), CSP unchanged. Single-scanner reports are
+  unchanged (the SLA lives in the combined exec layer where the aggregate bands are); the
+  per-finding technical body is untouched.
+
+### Seams (P4)
+
+- `_remediation_sla` teaching cases: CRITICAL→15, HIGH→30, MEDIUM→90, LOW→180, INFO/UNKNOWN
+  → None (no SLA row).
+- render tests: a combined report with Critical+High findings shows the `.sla` table with
+  "15 days"/"30 days" rows and the illustrative-benchmark honesty note (never "compliance"
+  as a guarantee); a combined report with only INFO findings shows no SLA rows; the SLA
+  never claims a measured deadline.
+
 ## P1 acceptance criteria
 
 - **A1 Scope/coverage box** at the top of the combined report (first section

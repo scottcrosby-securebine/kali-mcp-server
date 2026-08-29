@@ -1069,5 +1069,90 @@ class ReconVulnHeroesP3d(unittest.TestCase):
         self.assertNotIn("vuln-hero", h)
 
 
+class RemediationSlaP4(unittest.TestCase):
+    """Wave-2 P4/M5: an auto remediation SLA benchmark from the severity band in the
+    combined exec layer. The window is an ILLUSTRATIVE policy target, never a measured
+    deadline or a compliance guarantee; KEV/regulatory dates override."""
+
+    def setUp(self):
+        self.server, _ = load_server()
+        if not hasattr(self.server, "_remediation_sla"):
+            self.skipTest("_remediation_sla absent on this revision")
+
+    def test_sla_days_per_band(self):
+        self.assertEqual(15, self.server._remediation_sla("CRITICAL"))
+        self.assertEqual(30, self.server._remediation_sla("HIGH"))
+        self.assertEqual(90, self.server._remediation_sla("MEDIUM"))
+        self.assertEqual(180, self.server._remediation_sla("LOW"))
+        self.assertIsNone(self.server._remediation_sla("INFO"))
+        self.assertIsNone(self.server._remediation_sla("UNKNOWN"))
+        self.assertEqual(15, self.server._remediation_sla("critical"))   # case-insensitive
+
+    def test_combined_report_shows_sla_block(self):
+        # remediable package-upgrade findings become fix-queue work units, which the SLA
+        # counts (B1: the SLA covers only remediable items, so it never contradicts the
+        # "No remediable findings" line).
+        report = _combined(self.server, [_result([
+            {"VulnerabilityID": "CVE-2021-44228", "Severity": "CRITICAL", "PkgName": "log4j", "InstalledVersion": "2.14", "FixedVersion": "2.16", "Title": "x"},
+            {"VulnerabilityID": "CVE-2020-11111", "Severity": "HIGH", "PkgName": "openssl", "InstalledVersion": "1.1", "FixedVersion": "1.2", "Title": "y"},
+            {"VulnerabilityID": "CVE-2019-22222", "Severity": "MEDIUM", "PkgName": "zlib", "InstalledVersion": "1.0", "FixedVersion": "1.1", "Title": "z"}], scanner="trivy")])
+        self.assertIn('class="sla"', report)
+        self.assertIn("15-day target", report)        # Critical, framed as a target
+        self.assertIn("30-day target", report)        # High
+        self.assertIn("90-day target", report)        # Medium
+        # no Low findings -> no Low TABLE ROW (the note still names all four windows)
+        sla_table = report.split('class="sla"', 1)[1].split("</table>", 1)[0]
+        self.assertNotIn('sev-low">Low', sla_table)
+        self.assertIn('sev-critical">Critical', sla_table)
+        # at-a-glance honesty (red-team N1): the block heading itself says "illustrative",
+        # so a skimmed/screenshotted table is not read as a committed deadline.
+        self.assertIn("Fix-queue items", report)         # SLA counts remediation work units
+        self.assertIn("illustrative benchmark", report)
+        # full disclaimer: never a measured deadline or compliance guarantee; KEV overrides
+        self.assertIn("NOT a measured deadline", report)
+        self.assertIn("NOT a compliance", report)
+        self.assertIn("KEV", report)
+        self.assertNotIn("<script", report)
+
+    def test_render_uses_the_sla_helper_single_source(self):
+        # Standards F2 / red-team N2: the render path must use _remediation_sla (the single
+        # source of truth), so a change to the helper flows to the report. Patch the helper
+        # and confirm the rendered window follows it.
+        original = self.server._remediation_sla
+        self.server._remediation_sla = lambda band: 7 if str(band).upper() == "CRITICAL" else original(band)
+        try:
+            report = _combined(self.server, [_result([
+                {"VulnerabilityID": "CVE-2021-44228", "Severity": "CRITICAL", "PkgName": "p", "InstalledVersion": "1", "FixedVersion": "2", "Title": "x"}], scanner="trivy")])
+            self.assertIn("7-day target", report)      # render followed the patched helper
+        finally:
+            self.server._remediation_sla = original
+
+    def test_cve_lane_work_unit_counted_in_sla(self):
+        # a valid-CVE finding with no package upgrade is a CVE-lane fix-queue work unit; the
+        # SLA must count it by severity (its work-unit severity slot is populated, not None).
+        report = _combined(self.server, [_result([
+            {"VulnerabilityID": "CVE-2021-44228", "Severity": "HIGH", "Title": "Log4Shell"}], scanner="trivy")])
+        self.assertIn('class="sla"', report)
+        self.assertIn("30-day target", report)           # High -> 30 days
+        self.assertNotIn("15-day target", report)         # no Critical work unit
+
+    def test_sla_does_not_contradict_no_remediable_findings(self):
+        # red-team B1: a coloured hardening finding (weak cipher, no CVE / no fix) never
+        # becomes a fix-queue work unit, so the report says "No remediable findings". The
+        # SLA counts fix-queue items, so it must NOT assert a remediation target for it --
+        # the two must never contradict in one exec layer.
+        report = _combined(self.server, [_result([
+            {"Severity": "HIGH", "Title": "Weak cipher RC4", "id": "tls-cipher-rc4"}], scanner="testssl")])
+        self.assertIn("No remediable findings", report)
+        self.assertNotIn('class="sla"', report)          # no SLA row -> no contradiction
+        self.assertNotIn("30-day target", report)
+
+    def test_info_only_combined_has_no_sla_rows(self):
+        report = _combined(self.server, [_result([
+            {"VulnerabilityID": "CVE-0", "Severity": "INFO", "PkgName": "p", "Title": "i"}], scanner="trivy")])
+        # no coloured severity -> the SLA block is omitted entirely (no rows to show)
+        self.assertNotIn('class="sla"', report)
+
+
 if __name__ == "__main__":
     unittest.main()
