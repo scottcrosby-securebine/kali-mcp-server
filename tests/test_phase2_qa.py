@@ -65,7 +65,10 @@ class ControlByteStripTests(unittest.TestCase):
                           ("word-joiner", "\u2060"), ("BOM", "\ufeff"),
                           ("soft-hyphen", "\u00ad"), ("NBSP", "\u00a0"),
                           ("ALM-U+061C", "\u061c"), ("TAG-r", "\U000e0072"),
-                          ("var-selector", "\ufe0f"), ("CGJ", "\u034f")]:
+                          ("var-selector", "\ufe0f"), ("CGJ", "\u034f"),
+                          # non-Cf default-ignorables (DI, not category Cf)
+                          ("Hangul-filler", "\u115f"), ("Mongolian-FVS", "\u180b"),
+                          ("reserved-2065", "\u2065"), ("Khmer", "\u17b4")]:
             with self.subTest(sep=name):
                 payload = f"authorization: Bea{sep}rer SECRETLEAK123"
                 out = self.server._redact_scanner_data(payload)
