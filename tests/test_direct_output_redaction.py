@@ -58,6 +58,16 @@ class DirectOutputRedactionTests(unittest.TestCase):
         ("a private key block",
          "-----BEGIN RSA PRIVATE KEY-----\nKEYBODYLEAK\n-----END RSA PRIVATE KEY-----\n",
          "KEYBODYLEAK"),
+        # #74: nikto restates a header value away from its name, past the reach
+        # of the keyword pattern.
+        ("nikto header-contents prose",
+         "+ Uncommon header(s) 'x-api-key' found, with contents: leak_apikey_PLAINTEXTKEY_7f3a9c001122334455.\n",
+         "leak_apikey_PLAINTEXTKEY_7f3a9c001122334455"),
+        # A bare HTTP-Basic credential not preceded by an Authorization keyword
+        # is only caught by the Basic pattern (#74/#78 pair).
+        ("a bare Basic auth credential in prose",
+         "Server offered Basic dXNlcjpzM2NyZXRQQVNTd29yZA== to the client\n",
+         "dXNlcjpzM2NyZXRQQVNTd29yZA=="),
     )
 
     # Ordinary output every one of these tools emits. Redaction must leave it
@@ -74,6 +84,10 @@ class DirectOutputRedactionTests(unittest.TestCase):
          "Registrar Abuse Contact Email: abuse@registrar.tld\n", "abuse@registrar.tld"),
         ("an enum4linux share table",
          "\tACME-FS1        Disk      Company Files\n", "ACME-FS1"),
+        # #78: the Basic pattern must not eat English words after "Basic".
+        ("a metasploit Basic options header",
+         "Module options (auxiliary/scanner/ssh/ssh_login):\n\nBasic options:\n", "Basic options:"),
+        ("the phrase Basic auth", "Server requires Basic auth here\n", "Basic auth"),
     )
 
     def test_removes_secrets_from_direct_output(self):

@@ -677,7 +677,12 @@ class DnsReconCaptureTests(unittest.TestCase):
             patch.object(self.server, "_write_scanner_result", lambda d: "Z" * 32),
         ):
             asyncio.run(self.server.amass_enum("x.com"))
-        self.assertEqual(["amass", "enum", "-passive", "-d", "x.com"], captured["argv"])
+        # -timeout is amass_enum's own bounded-runtime arg (#76); the invariant
+        # this test guards is that the CAPTURE path injects no output-file flag.
+        self.assertEqual(["amass", "enum", "-passive", "-timeout", "8", "-d", "x.com"],
+                         captured["argv"])
+        for injected in ("-json", "-o", "-oA"):
+            self.assertNotIn(injected, captured["argv"])
 
     # dnsrecon logs "Saving records to JSON file: <path>" to stderr, which
     # run_command merges. That line exists only because capture asked for it
