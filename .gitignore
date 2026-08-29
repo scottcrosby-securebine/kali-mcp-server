@@ -76,3 +76,4 @@ dist/
 
 # Build/preparation artifacts
 prep-for-github.sh
+*-run-state.md
