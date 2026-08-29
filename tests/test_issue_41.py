@@ -228,6 +228,14 @@ class ExecLayerP1(unittest.TestCase):
         # traffic-light KRI row
         self.assertIn("tl-row", report)
         self.assertIn("actively exploited", report)
+        # A4: one value per fact — the hero posture equals the top fix-queue chip,
+        # and the traffic-light critical count equals the severity tally.
+        import re
+        hero = re.search(r'hn-score band-\w+">(\d+)', report)
+        chip = re.search(r'Risk (\d+) \u00b7', report)
+        self.assertTrue(hero and chip, "hero score and a risk chip must both render")
+        self.assertEqual(hero.group(1), chip.group(1))
+        self.assertIn("1 critical", report)
 
     def test_no_scored_units_states_it_rather_than_zero(self):
         report = _combined(self.server, [_result(
