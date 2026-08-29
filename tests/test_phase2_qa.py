@@ -54,6 +54,21 @@ class ControlByteStripTests(unittest.TestCase):
         out = self.run_output("token is Bea\x1b[0mrer SECRETLEAK123 here\n")
         self.assertNotIn("SECRETLEAK123", out)
 
+    def test_invisible_unicode_split_secret_is_redacted_not_leaked(self):
+        # red-team: a secret keyword split by an INVISIBLE unicode char (not just
+        # an ESC/C0/C1 byte) must be reassembled and redacted. ZWSP/ZWNJ/word-
+        # joiner/BOM/soft-hyphen/NBSP all split a keyword so SECRET_KEY misses.
+        for name, sep in [("ZWSP", "\u200b"), ("ZWNJ", "\u200c"),
+                          ("word-joiner", "\u2060"), ("BOM", "\ufeff"),
+                          ("soft-hyphen", "\u00ad"), ("NBSP", "\u00a0")]:
+            with self.subTest(sep=name):
+                payload = f"authorization: Bea{sep}rer SECRETLEAK123"
+                out = self.server._redact_scanner_data(payload)
+                self.assertNotIn("SECRETLEAK123", out, f"{name} split leaked")
+        # a keyword itself split (pass<NBSP>word) still redacts its value
+        self.assertNotIn("SECRETLEAK123",
+                         self.server._redact_scanner_data("pass\u00a0word: SECRETLEAK123"))
+
     def test_report_escape_strips_control_bytes(self):
         escaped = self.server._escape_report_data("x\x1b[31my\x07z")
         self.assertNotIn("\x1b", escaped)
@@ -162,6 +177,14 @@ class TargetHostPortTests(unittest.TestCase):
         for target, default, expected in cases:
             with self.subTest(target=target):
                 self.assertEqual(expected, self.server._target_host_port(target, default))
+
+    def test_colon_heavy_non_ipv6_target_does_not_raise(self):
+        # red-team regression: bracketing any >=2-colon token sent a malformed
+        # host (ex.com:22:99) into a urlsplit ValueError. Only a real IPv6 literal
+        # is bracketed now, so a bad host degrades gracefully instead of crashing.
+        for t in ("ex.com:22:99", "a:b:c:d", "host:1:2:3:4"):
+            with self.subTest(target=t):
+                self.assertIsInstance(self.server._target_host_port(t, "443"), str)
 
     def test_sslscan_does_not_double_append_port(self):
         calls, fake = _capture(stdout="Testing SSL server")
