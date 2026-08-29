@@ -165,3 +165,107 @@ class RuntimeArchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CombinedTrailerTests(unittest.TestCase):
+    """#87: quick_recon / network_sweep must classify child status, not append a
+    hard-coded ✅. Mirrors full_recon's ✅/⚠️/❌ tiers."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    def _run(self, coro):
+        return asyncio.run(coro)
+
+    @staticmethod
+    async def _fail(*a, **k):
+        return "❌ Error: connection refused"
+
+    @staticmethod
+    async def _ok(*a, **k):
+        return "✅ done"
+
+    def _trailer(self, text):
+        return text.strip().splitlines()[-2]
+
+    def test_quick_recon_all_fail_is_error(self):
+        s = self.server
+        with patch.object(s, "nmap_scan", self._fail), \
+             patch.object(s, "whatweb_scan", self._fail):
+            out = self._run(s.quick_recon("10.0.0.1"))
+        self.assertTrue(self._trailer(out).startswith("❌"), out)
+
+    def test_quick_recon_mixed_is_warning(self):
+        s = self.server
+        with patch.object(s, "nmap_scan", self._fail), \
+             patch.object(s, "whatweb_scan", self._ok), \
+             patch.object(s, "whois_lookup", self._ok):
+            out = self._run(s.quick_recon("example.com"))
+        self.assertTrue(self._trailer(out).startswith("⚠️"), out)
+
+    def test_quick_recon_all_pass_is_success(self):
+        s = self.server
+        with patch.object(s, "nmap_scan", self._ok), \
+             patch.object(s, "whatweb_scan", self._ok), \
+             patch.object(s, "whois_lookup", self._ok):
+            out = self._run(s.quick_recon("example.com"))
+        self.assertTrue(self._trailer(out).startswith("✅"), out)
+
+    def test_network_sweep_all_fail_is_error(self):
+        s = self.server
+        with patch.object(s, "nmap_scan", self._fail), \
+             patch.object(s, "nbtscan_scan", self._fail):
+            out = self._run(s.network_sweep("10.0.0.0/24"))
+        self.assertTrue(self._trailer(out).startswith("❌"), out)
+
+    def test_network_sweep_all_pass_is_success(self):
+        s = self.server
+        with patch.object(s, "nmap_scan", self._ok), \
+             patch.object(s, "nbtscan_scan", self._ok):
+            out = self._run(s.network_sweep("10.0.0.0/24"))
+        self.assertTrue(self._trailer(out).startswith("✅"), out)
+
+
+class CompoundKeyRedactionTests(unittest.TestCase):
+    """#98: a secret keyword as a non-adjacent segment of a compound key must
+    still redact the value on the flat text path, WITHOUT over-redacting benign
+    metric keys. Paired MUST_REMOVE / MUST_KEEP corpus (issue asks for one)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    MUST_REMOVE = (
+        "aws_secret_access_key=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
+        "AWS_SECRET_ACCESS_KEY=UPPERVAL1234567890",
+        "api_key_value=abcdef123456",
+        "secret_access_key=topsecretval",
+        "app.secret.key=deadbeefcafe",
+        # regressions: keyword already adjacent to the separator
+        "db_password=hunter2",
+        "admin_password=p@ssw0rd",
+        "session=abc123def456",
+    )
+    MUST_KEEP = (
+        "token_count=5",
+        "session_timeout=30",
+        "password_length=8",
+        "secret_count=3",
+        "retry_count=2",
+        "max_tokens=4096",
+        "error_code=500",
+        "cookie_jar_size=12",
+    )
+
+    def test_must_remove(self):
+        red = self.server._redact_scanner_data
+        for payload in self.MUST_REMOVE:
+            with self.subTest(payload=payload):
+                self.assertIn("[REDACTED]", red(payload))
+
+    def test_must_keep(self):
+        red = self.server._redact_scanner_data
+        for payload in self.MUST_KEEP:
+            with self.subTest(payload=payload):
+                self.assertNotIn("[REDACTED]", red(payload))

@@ -154,3 +154,33 @@ Folded into this branch after the F1-F12 gate exited; same security-hardening th
   is rejected with the standard guard error before argv construction; a normal
   target still reaches the tool. **Seam:** the three wrappers reject a dash target;
   a normal target still calls execute_command.
+
+## Phase 1 completion fixes (#87, #98) — 2026-08-30
+
+These two were filed by the batch's own red-team as follow-ups and are folded in
+to complete the Phase-1 correctness lane (ROADMAP rows 5, 12).
+
+- **#87 — quick_recon / network_sweep false ✅.** Both appended a hard-coded
+  `✅ ... completed` regardless of child status; a fully-failed sweep read green
+  on its last line (same family as #81). New shared helper `_workflow_trailer(label,
+  checks)` picks `✅` (all passed) / `⚠️ completed with failed checks` (some failed)
+  / `❌ failed: every attempted check failed` (all failed), mirroring full_recon's
+  tiers. Both tools now build a `checks` list via the existing `_workflow_check`.
+  **AC:** all children fail -> ❌; some fail -> ⚠️; all pass -> ✅. **Seam:**
+  CombinedTrailerTests (all-fail / mixed / all-pass, both tools, mocked children).
+- **#98 — compound-key credential leak on flat text path.** The flat `key:value`
+  pattern required a secret keyword adjacent to the `:`/`=`, so
+  `aws_secret_access_key=` and `api_key_value=` leaked (keyword is a mid/prefix
+  segment). Fix: after the keyword alternation, allow a bounded closed set of
+  secret-suffix segments `(?:[_.\-](?:access[_.\-]?key|keys?|values?|token|secret|
+  passwd|password)){0,6}` before the separator. The suffix set is closed and
+  credential-only, so `token_count=`, `secret_count=`, `password_length=`,
+  `cookie_jar_size=` (benign metric suffixes) stay untouched — no over-redaction.
+  Bounded `{0,6}` quantifier over separator-anchored segments = no ReDoS.
+  **AC:** paired MUST_REMOVE (aws_secret_access_key, api_key_value, secret_access_key,
+  dotted app.secret.key, + adjacency regressions) all redact; MUST_KEEP (token_count,
+  session_timeout, password_length, secret_count, retry_count, max_tokens,
+  error_code, cookie_jar_size) all intact. **Seam:** CompoundKeyRedactionTests
+  (MUST_REMOVE / MUST_KEEP corpus); redaction_differential sweep destroys 0
+  base-kept content. **Scope:** flat text path only; structured JSON + HTML already
+  guard via SECRET_KEY dict-key match. #84 stays track-only (upstream transport).
