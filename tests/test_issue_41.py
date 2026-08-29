@@ -555,5 +555,231 @@ class TlsGradeHeroP3a(unittest.TestCase):
         self.assertNotIn("tls-hero", report)
 
 
+class MacroVerdictHeroP3b(unittest.TestCase):
+    """Wave-2 P3b: macro (olevba/msodde) verdict banner, computed downward from what
+    STATIC analysis flagged. Never asserts detonation, never 'malicious'/'safe', and
+    never tags an ATT&CK technique the scan text did not evidence (P2 overclaim rule)."""
+
+    def setUp(self):
+        self.server, _ = load_server()
+        if not hasattr(self.server, "_macro_verdict"):
+            self.skipTest("_macro_verdict absent on this revision")
+
+    def v(self, findings, scanner="olevba"):
+        """(verdict, vclass)"""
+        verdict, vclass, *_ = self.server._macro_verdict(findings, scanner)
+        return verdict, vclass
+
+    def tags(self, findings, scanner="olevba"):
+        return [t[0] for t in self.server._macro_verdict(findings, scanner)[3]]
+
+    def _macro_report(self, scanner, findings):
+        return self.server._render_report({
+            "schema_version": 1, "scanner": scanner, "status": "success",
+            "source_type": "artifact", "target_ref": "sample.docm",
+            "metadata": {}, "findings": findings})
+
+    # --- verdict tiers (worst-tier-wins) --------------------------------------
+    def test_autoexec_plus_distinct_suspicious_is_high_risk(self):
+        # AutoOpen (auto-run hook) COMBINED WITH a distinct Shell behaviour is the
+        # weaponised-document pattern -> HIGH RISK.
+        verdict, vclass = self.v([
+            {"type": "AutoExec", "keyword": "AutoOpen", "description": "Runs when opened"},
+            {"type": "Suspicious", "keyword": "Shell", "description": "May run an executable"}])
+        self.assertEqual("HIGH RISK", verdict)
+        self.assertEqual("band-critical", vclass)
+
+    def test_msodde_ddeauto_is_high_risk(self):
+        # auto-executing DDE is inherently the classic weaponised pattern.
+        verdict, vclass = self.v(
+            [{"type": "dde", "field": "DDEAUTO cmd /c calc", "source": "word/document.xml"}],
+            "msodde")
+        self.assertEqual("HIGH RISK", verdict)
+        self.assertEqual("band-critical", vclass)
+
+    def test_autoexec_alone_is_suspicious_not_high_risk(self):
+        # a bare auto-run hook with NO other flagged behaviour is SUSPICIOUS, not
+        # HIGH RISK -- the combination is what earns the top tier.
+        self.assertEqual(("SUSPICIOUS", "band-high"), self.v(
+            [{"type": "AutoExec", "keyword": "AutoOpen", "description": "Runs when opened"}]))
+
+    def test_suspicious_without_autoexec_is_suspicious(self):
+        self.assertEqual(("SUSPICIOUS", "band-high"), self.v(
+            [{"type": "Suspicious", "keyword": "Chr", "description": "string obfuscation"}]))
+
+    def test_no_findings_is_no_indicators_never_safe(self):
+        verdict, vclass, drivers, tags, coverage = self.server._macro_verdict([], "olevba")
+        self.assertEqual("NO INDICATORS", verdict)
+        self.assertEqual("band-low", vclass)
+        self.assertEqual([], tags)
+        # honesty: absence of indicators is NOT proof of safety (it says so in a
+        # negation), and the note states the macro was not executed. Never a bare
+        # safety claim -- "safe" only ever appears inside "not proof ... is safe".
+        low = coverage.lower()
+        self.assertIn("not proof", low)
+        self.assertIn("not executed", low)
+        self.assertNotIn("is safe.", low)   # no standalone safety assertion
+
+    def test_fixture_single_autoopen_typed_suspicious_is_suspicious(self):
+        # the olevba-success fixture labels AutoOpen "Suspicious"; the keyword set
+        # still recognises it as an auto-run hook, and with nothing else it is
+        # SUSPICIOUS (auto-run alone), not HIGH RISK.
+        self.assertEqual(("SUSPICIOUS", "band-high"), self.v(
+            [{"type": "Suspicious", "keyword": "AutoOpen", "description": "Runs when opened"}]))
+
+    # --- ATT&CK tags (observed-only, no overclaim) ----------------------------
+    def test_any_indicator_tags_malicious_file(self):
+        self.assertIn("T1204.002", self.tags(
+            [{"type": "Suspicious", "keyword": "Chr", "description": "obfuscation"}]))
+
+    def test_powershell_tags_t1059_001_not_command_shell(self):
+        # "powershell" contains the substring "shell"; the command-shell tag must NOT
+        # fire off that collision -- only PowerShell (T1059.001) is evidenced.
+        tags = self.tags([{"type": "Suspicious", "keyword": "powershell",
+                           "description": "downloads a payload"}])
+        self.assertIn("T1059.001", tags)
+        self.assertNotIn("T1059.003", tags)
+
+    def test_msodde_dde_tags_t1559_002(self):
+        self.assertIn("T1559.002", self.tags(
+            [{"type": "dde", "field": "DDEAUTO powershell -enc AAAA", "source": "x"}], "msodde"))
+
+    def test_bare_suspicious_tags_only_malicious_file(self):
+        self.assertEqual(["T1204.002"], self.tags(
+            [{"type": "Suspicious", "keyword": "Chr", "description": "string obfuscation"}]))
+
+    def test_autoopen_does_not_tag_persistence(self):
+        # "Runs when opened" contains "run"; T1547 persistence must NOT fire on it.
+        # AutoOpen is auto-execution (T1204.002), not a Run-key/startup write.
+        self.assertNotIn("T1547.001", self.tags(
+            [{"type": "AutoExec", "keyword": "AutoOpen", "description": "Runs when opened"}]))
+
+    def test_registry_run_key_tags_persistence(self):
+        self.assertIn("T1547.001", self.tags(
+            [{"type": "Suspicious", "keyword": "RegWrite", "description": "writes an HKCU Run key"}]))
+
+    def test_shell_keyword_tags_command_shell(self):
+        # olevba emits the VBA function name "Shell" as a discrete keyword -> command
+        # execution (T1059.003), matched keyword-exact.
+        self.assertIn("T1059.003", self.tags(
+            [{"type": "Suspicious", "keyword": "Shell", "description": "runs a program"}]))
+
+    def test_no_indicators_tags_nothing(self):
+        self.assertEqual([], self.tags([]))
+
+    def test_autoexec_plus_encoded_payload_is_high_risk(self):
+        # red-team B1: olevba emits obfuscated-payload findings under its OWN type
+        # labels (Base64 String / Hex String / Dridex string / VBA obfuscated Strings),
+        # none of which are "suspicious"/"ioc". auto-exec + a concealed payload is the
+        # weaponised pattern and MUST be HIGH RISK, not SUSPICIOUS.
+        for payload_type in ("Base64 String", "Hex String", "Dridex string",
+                             "VBA obfuscated Strings"):
+            verdict, _ = self.v([
+                {"type": "AutoExec", "keyword": "AutoOpen", "description": "Runs when opened"},
+                {"type": payload_type, "keyword": "TVqQAA", "description": "encoded payload"}])
+            self.assertEqual("HIGH RISK", verdict, payload_type)
+
+    def test_two_autoexec_hooks_without_payload_stay_suspicious(self):
+        # broadening the indicator set must NOT tip two bare auto-run hooks (no payload)
+        # into HIGH RISK -- there is no concerning behaviour beyond the hooks.
+        self.assertEqual(("SUSPICIOUS", "band-high"), self.v([
+            {"type": "AutoExec", "keyword": "AutoOpen", "description": "Runs when opened"},
+            {"type": "AutoExec", "keyword": "AutoClose", "description": "Runs when closed"}]))
+
+    def test_registry_read_does_not_tag_persistence(self):
+        # red-team N1: a macro that only READS the registry is not autostart persistence.
+        # bare "registry"/"hkcu"/"hklm" must not tag T1547.
+        for f in ({"type": "Suspicious", "keyword": "RegRead",
+                   "description": "May read system registry values"},
+                  {"type": "IOC", "keyword": "HKCU\\Software\\Foo",
+                   "description": "Reads a value under HKCU"}):
+            self.assertNotIn("T1547.001", self.tags([f]), f)
+
+    def test_non_dict_entry_does_not_manufacture_high_risk(self):
+        # red-team N2: an unclassifiable non-dict entry keeps the report off NO
+        # INDICATORS but must NOT combine with a lone AutoOpen to fabricate HIGH RISK.
+        verdict, _ = self.v([
+            {"type": "AutoExec", "keyword": "AutoOpen", "description": "Runs when opened"},
+            "parser artifact string"])
+        self.assertEqual("SUSPICIOUS", verdict)
+
+    def test_autoexec_token_in_payload_value_does_not_suppress_high_risk(self):
+        # red-team F1 (underclaim): the auto-run test must key off the entry's OWN
+        # type/keyword, not a substring of attacker-controlled content. A Base64 payload
+        # whose keyword embeds "autoopen" must NOT be misread as an auto-run hook and
+        # thereby erase the concealed-payload half -> the doc stays HIGH RISK.
+        verdict, _ = self.v([
+            {"type": "AutoExec", "keyword": "AutoOpen", "description": "Runs when opened"},
+            {"type": "Base64 String", "keyword": "ZZautoopenZZ", "description": "encoded payload"}])
+        self.assertEqual("HIGH RISK", verdict)
+
+    def test_autoexec_token_in_ioc_value_does_not_fabricate_high_risk(self):
+        # red-team F1 (overclaim): an IOC filename containing "workbook_open" is a plain
+        # indicator, NOT an auto-run trigger; it must not manufacture the auto-exec half.
+        # Two weak indicators with no real auto-run hook -> SUSPICIOUS, not HIGH RISK.
+        verdict, _ = self.v([
+            {"type": "IOC", "keyword": "c:/logs/workbook_open.log", "description": "File name"},
+            {"type": "Suspicious", "keyword": "Environ", "description": "May read environment variables"}])
+        self.assertEqual("SUSPICIOUS", verdict)
+
+    def test_attack_tags_do_not_fire_on_ioc_url_substrings(self):
+        # red-team F3: a technique/persistence tag must not be derived from a token buried
+        # in an attacker-controlled IOC value (a URL/domain), which is not behavioural
+        # evidence the macro uses that technique.
+        for f in ({"type": "IOC", "keyword": "http://powershell-cdn.example/p", "description": "URL"},
+                  {"type": "IOC", "keyword": "http://comspec.example/x", "description": "URL"},
+                  {"type": "IOC", "keyword": "http://autostart.example/y", "description": "URL"}):
+            tags = self.tags([f])
+            self.assertEqual(["T1204.002"], tags, f)
+
+    def test_powershell_in_a_behavioural_description_still_tags(self):
+        # the F3 fix must not suppress a REAL behavioural signal: powershell named in a
+        # Suspicious entry's keyword/description is genuine execution evidence.
+        self.assertIn("T1059.001", self.tags(
+            [{"type": "Suspicious", "keyword": "powershell", "description": "invokes powershell"}]))
+
+    def test_autorun_keyword_backstop_covers_real_olevba_triggers(self):
+        # red-team NB4: the keyword backstop must not depend solely on olevba stamping
+        # type=="AutoExec". A real auto-run trigger (AutoNew/Workbook_Activate/...) whose
+        # entry is typed Suspicious must still be recognised as an auto-run hook, so
+        # auto-run + a payload still grades HIGH RISK (underclaim is the dangerous way).
+        for kw in ("AutoNew", "AutoExit", "Document_New", "Workbook_Activate",
+                   "Workbook_BeforeClose", "Window_Activate"):
+            verdict, _ = self.v([
+                {"type": "Suspicious", "keyword": kw, "description": "auto-run handler"},
+                {"type": "Base64 String", "keyword": "TVqQAA", "description": "encoded payload"}])
+            self.assertEqual("HIGH RISK", verdict, kw)
+
+    # --- render + scope -------------------------------------------------------
+    def test_olevba_report_shows_macro_hero(self):
+        report = self._macro_report("olevba", [
+            {"type": "AutoExec", "keyword": "AutoOpen", "description": "Runs when opened"},
+            {"type": "Suspicious", "keyword": "powershell", "description": "downloads a payload"}])
+        self.assertIn("macro-hero", report)
+        self.assertIn("HIGH RISK", report)
+        self.assertIn("Macro verdict", report)
+        self.assertIn("T1204.002", report)
+        self.assertIn("T1059.001", report)
+        self.assertIn("document not executed", report)      # honesty qualifier
+        self.assertNotIn("[truncated]", report)
+        self.assertNotIn("<script", report)
+
+    def test_non_macro_report_has_no_verdict_hero(self):
+        report = self._macro_report("nikto", [
+            {"id": "3268", "Severity": "MEDIUM", "Title": "dir indexing"}])
+        # nikto keeps its finding rows; no macro verdict hero is injected.
+        self.assertNotIn("macro-hero", report)
+        self.assertNotIn("Macro verdict", report)
+
+    def test_tls_and_macro_heroes_are_mutually_exclusive(self):
+        # the shared exec-hero slot must not render both; an olevba report shows the
+        # macro hero and NOT the TLS grade hero.
+        report = self._macro_report("olevba", [
+            {"type": "Suspicious", "keyword": "Chr", "description": "obfuscation"}])
+        self.assertIn("macro-hero", report)
+        self.assertNotIn("tls-hero", report)
+
+
+
 if __name__ == "__main__":
     unittest.main()

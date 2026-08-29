@@ -143,6 +143,91 @@ silence, and is never "A+".
   (F beats B); sparse-scanner coverage note omits "named vulnerabilities".
 - render test: a testssl report shows the `tls-hero` with the grade letter and the
   "ceiling on posture" qualifier; a nikto report shows no hero.
+### P3b — Macro verdict banner hero (THIS SUB-PHASE)
+
+The single-scanner **macro** report (olevba/msodde) leads its exec summary with a
+bold **verdict/risk banner hero**, the auto-exec triggers that earned the verdict,
+observed MITRE ATT&CK technique tags, and a coverage qualifier. Honesty anchor
+(carried from P2/P3a): the verdict is computed DOWNWARD from what STATIC analysis
+ACTUALLY FLAGGED; olevba/msodde never execute the document, so the banner never
+asserts detonation, and a clean scan means "no indicators found by static
+analysis", never "safe" (RB2/RB4).
+
+- **MA1 Verdict rubric (F14-analog).** `_macro_verdict(findings, scanner)` →
+  `(verdict, vclass, drivers, attack_tags, coverage)`, worst tier wins.
+  olevba analysis entries carry `type` (`AutoExec`/`Suspicious`/`IOC`/`Hex String`/
+  `Base64 String`/`VBA obfuscated Strings`/…), `keyword`, `description`; msodde
+  emits `type:"dde"`, `field` (the DDE command), `source`. Tiers:
+    - **HIGH RISK** (`band-critical`) — an **auto-exec trigger** (olevba `type` ==
+      `AutoExec`, or a `keyword` in the auto-run/close handler family — AutoOpen/
+      AutoExec/AutoNew/AutoExit/Auto_Close, Document_Open/Document_Close/Document_New/
+      Document_BeforeClose, Workbook_Open/Workbook_Close/Workbook_Activate/
+      Workbook_BeforeClose, Window_Activate (close/activate handlers auto-execute too;
+      the backstop no longer depends solely on olevba's type string, red-team NB4) —
+      matched EXACTLY against the entry's own type/keyword,
+      never as a substring of the free-text blob, so an "autoopen" token smuggled into a
+      Base64 payload keyword or an IOC filename cannot mis-tier the verdict, red-team F1)
+      **combined with** any DISTINCT concerning indicator
+      (a Suspicious/IOC entry, OR an encoded/obfuscated payload label olevba emits under
+      its own type — Base64 String/Hex String/Dridex string/VBA obfuscated Strings —
+      red-team B1); OR any msodde `dde`/DDEAUTO finding (auto-executing DDE is the
+      classic weaponised-document pattern). The verdict word is "HIGH RISK", never
+      "MALICIOUS" (static analysis cannot prove intent).
+    - **SUSPICIOUS** (`band-high`) — indicators present but not the HIGH-RISK
+      combination: an auto-exec trigger (or several) alone, or concerning entries
+      (Suspicious/IOC/payload labels) without an auto-exec trigger. Warrants manual
+      review of the decoded macro.
+    - **NO INDICATORS** (`band-low`) — no analysis findings. Phrased "No macro
+      indicators flagged by static analysis" with the coverage caveat; never "clean"
+      or "safe".
+- **MA2 Drivers.** `drivers` lists the auto-exec triggers by keyword + description
+  (the behaviours that earned the tier), bounded; for msodde the DDE command
+  `field`. Empty drivers on the NO-INDICATORS tier render an explicit "none" line.
+- **MA3 ATT&CK tags (observed-only).** Tags are derived from finding CONTENT, never
+  hard-coded: any indicator ⇒ **T1204.002** (User Execution: Malicious File, the
+  document is the lure); `powershell` ⇒ **T1059.001**; a command-interpreter token
+  (`cmd.exe`/`cmd /`/`comspec`/`wscript.shell` substrings, or the keyword-exact VBA
+  functions `shell`/`wscript`/`cscript`) ⇒ **T1059.003** — a bare `shell` substring is
+  NOT used, since it collides with "powerSHELL"; a msodde `dde` finding ⇒ **T1559.002**
+  (Inter-Process Communication: DDE); a GENUINE persistence write (`run key`/`runkey`/
+  `runonce`/`startup folder`/`autostart`/`currentversion\run`) ⇒ **T1547.001**. A
+  registry READ, "Runs when opened", or a bare AutoOpen hook is NOT persistence and MUST
+  NOT tag T1547 (red-team N1). Technique/persistence tokens are matched on BEHAVIOURAL
+  text (type + description + msodde `field` + a non-IOC keyword) — an IOC's raw URL/IP/
+  path value never drives a tag, so `http://powershell-cdn.example` does not tag
+  T1059.001 (red-team F3). No match beyond a present indicator ⇒ T1204.002 only.
+  NO INDICATORS ⇒ no tags. Never tag a technique the scan did not evidence (P2 overclaim
+  discipline).
+- **MA4 Coverage honesty.** The note names the scanner and states the verdict
+  reflects only STATIC pattern-matching of the document, that the macro was NOT
+  executed, and that absence of indicators is not proof of safety. Never a
+  definitive "malicious"/"benign" claim.
+- **MA5 Hero render.** A macro report's exec summary opens with `.macro-hero`: the
+  verdict word (colour-banded via existing `band-*` tokens), the drivers, the ATT&CK
+  tag chips, and the coverage `meta` note. A non-macro report shows no verdict hero.
+  The austere body (existing finding rows, evidence table) is unchanged, exactly as
+  P3a left the TLS body.
+- **MA6 Scriptless + a11y + scope.** Inline HTML + token colour, CSP unchanged, the
+  verdict word always present (never colour alone); every existing single-report
+  section keeps content and order; the combined report is untouched.
+
+### Seams (P3b)
+
+- `_macro_verdict` teaching cases: AutoOpen + Suspicious/IOC → HIGH RISK; msodde
+  DDEAUTO → HIGH RISK; Suspicious-only (no auto-exec) → SUSPICIOUS; auto-exec alone
+  → SUSPICIOUS; no findings → NO INDICATORS (+ coverage note, never "safe");
+  worst-tier-wins.
+- ATT&CK teaching cases: powershell keyword ⇒ T1059.001 present (not T1059.003 off the
+  "shell" substring); msodde dde ⇒ T1559.002; a bare Suspicious entry ⇒ T1204.002 only;
+  a registry READ ⇒ no T1547 (red-team N1); NO INDICATORS ⇒ no tags.
+- indicator-set teaching cases: AutoOpen + an encoded-payload label (Base64/Hex/Dridex/
+  VBA obfuscated) ⇒ HIGH RISK (red-team B1); two bare auto-run hooks, no payload ⇒
+  SUSPICIOUS; a non-dict junk entry beside a lone AutoOpen ⇒ SUSPICIOUS, never HIGH RISK
+  (red-team N2).
+- render test: an olevba report shows the `macro-hero` with the verdict word and the
+  "not executed" coverage qualifier; a nikto report shows no verdict hero; the macro
+  body finding rows are unchanged.
+
 - **P4 — Mappings + evidence + SLA** (the old epic M3/M4/M5): CWE→ATT&CK/NIST,
   evidence blocks, auto SLA/benchmark from band.
 

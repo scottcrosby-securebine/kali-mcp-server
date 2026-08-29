@@ -118,7 +118,12 @@ class ReportSizeTests(unittest.TestCase):
         # that also dropped 12 of every finding's 22 references; the cap is 25
         # now, so all real references render and the honest saving is smaller.
         # The ceiling is the measured figure plus headroom, so this catches a
-        # regression back toward repr-dumping without pinning exact bytes.
+        # regression back toward repr-dumping (which added +56 KB) without
+        # pinning exact bytes. Re-baselined for wave-2: the P2 per-finding
+        # detection-confidence chip renders on all 151 findings and the P3a/P3b
+        # hero CSS is fixed per-report overhead; together they lift this fixture
+        # to ~470,084 bytes. 475,000 keeps ~1% headroom -- still far below the
+        # +56 KB a repr-dump regression would add, so the guard's intent holds.
         findings = [{
             "VulnerabilityID": f"CVE-2024-{1000 + i}", "Title": f"Vulnerability {i}",
             "Severity": "HIGH", "PkgName": f"pkg{i}", "InstalledVersion": "1.0.0",
@@ -132,7 +137,7 @@ class ReportSizeTests(unittest.TestCase):
         } for i in range(151)]
         rendered = render(self.server, findings, scanner="trivy")
         self.assertEqual(151, rendered.count("<article>"))
-        self.assertLess(len(rendered), 470_000)
+        self.assertLess(len(rendered), 475_000)
         # All 22 references survive; the earlier size win partly came from
         # silently dropping 12 of them.
         self.assertNotIn("(+12 more)", rendered)
