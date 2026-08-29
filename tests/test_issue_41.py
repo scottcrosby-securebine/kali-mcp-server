@@ -938,5 +938,136 @@ class MetasploitCardP3c(unittest.TestCase):
         self.assertNotIn('class="hero msf-catalog"', h)
 
 
+class ReconVulnHeroesP3d(unittest.TestCase):
+    """Wave-2 P3d: a recon exposure hero (nmap) and a vuln severity hero (trivy/nuclei),
+    each computed from findings, each honest — open ports are exposure not vulnerability,
+    and vuln counts are detection-only, never a "secure" claim on a clean scan."""
+
+    def setUp(self):
+        self.server, _ = load_server()
+        if not hasattr(self.server, "_recon_exposure"):
+            self.skipTest("_recon_exposure absent on this revision")
+
+    def _report(self, scanner, findings):
+        return self.server._render_report({
+            "schema_version": 1, "scanner": scanner, "status": "success",
+            "source_type": "host", "target_ref": "t", "metadata": {}, "findings": findings})
+
+    # --- recon summary --------------------------------------------------------
+    def test_recon_exposure_counts(self):
+        f = [{"state": "open", "service": "ssh", "product": "OpenSSH", "version": "8.9"},
+             {"state": "open", "service": "http", "product": "nginx"},
+             {"state": "open", "service": "http"},
+             {"state": "closed", "service": "ftp"}, "junk"]
+        open_ports, services, versioned = self.server._recon_exposure(f)
+        self.assertEqual(3, open_ports)
+        self.assertEqual({"ssh": 1, "http": 2}, services)
+        self.assertEqual(2, versioned)
+
+    def test_recon_no_open_ports(self):
+        self.assertEqual((0, {}, 0), self.server._recon_exposure([{"state": "closed"}, "x"]))
+
+    # --- vuln summary ---------------------------------------------------------
+    def test_vuln_summary_counts_and_top_packages(self):
+        f = [{"VulnerabilityID": "CVE-2021-1", "Severity": "CRITICAL", "PkgName": "log4j"},
+             {"VulnerabilityID": "CVE-2021-2", "Severity": "HIGH", "PkgName": "log4j"},
+             {"VulnerabilityID": "CVE-2020-9", "Severity": "MEDIUM", "PkgName": "openssl"},
+             {"VulnerabilityID": "CVE-2019-9", "Severity": "INFO", "PkgName": "zlib"}]
+        counts, total, top = self.server._vuln_summary(f)
+        self.assertEqual({"CRITICAL": 1, "HIGH": 1, "MEDIUM": 1}, counts)   # INFO not counted
+        self.assertEqual(3, total)
+        self.assertEqual([("log4j", 2), ("openssl", 1)], top)
+
+    def test_vuln_summary_package_tally_matches_headline_basis(self):
+        # red-team N1: the per-package tally counts RAW coloured findings, the SAME basis
+        # as the headline total, so the two never disagree. Two coloured findings on one
+        # package -> headline 2 AND "log4j 2", not a deduped 1.
+        f = [{"VulnerabilityID": "CVE-2021-1", "Severity": "HIGH", "PkgName": "log4j"},
+             {"VulnerabilityID": "CVE-2021-2", "Severity": "HIGH", "PkgName": "log4j"}]
+        counts, total, top = self.server._vuln_summary(f)
+        self.assertEqual(2, total)
+        self.assertEqual([("log4j", 2)], top)
+        # the sum of per-package tallies equals the headline total when every finding
+        # carries a PkgName (the consistency invariant N1 fixed).
+        self.assertEqual(total, sum(n for _, n in top))
+
+    def test_vuln_summary_clean(self):
+        self.assertEqual(({}, 0, []), self.server._vuln_summary([]))
+
+    def test_nuclei_severity_counted(self):
+        counts, total, _ = self.server._vuln_summary(
+            [{"id": "t", "Severity": "HIGH", "Title": "x"}])
+        self.assertEqual({"HIGH": 1}, counts)
+
+    def test_none_fields_are_robust(self):
+        # red-team NB2: _render_report is generic over persisted documents; a None
+        # PkgName/service/product/version must not crash or render the literal "None".
+        counts, total, top = self.server._vuln_summary([
+            {"Severity": "HIGH", "PkgName": "log4j"},
+            {"Severity": "CRITICAL", "PkgName": None}])
+        self.assertEqual({"HIGH": 1, "CRITICAL": 1}, counts)
+        self.assertEqual([("log4j", 1)], top)                   # None PkgName not a package
+        open_ports, services, versioned = self.server._recon_exposure(
+            [{"state": "open", "service": None, "product": None, "version": None}])
+        self.assertEqual(1, open_ports)
+        self.assertEqual({"unknown": 1}, services)              # None service -> "unknown"
+        self.assertEqual(0, versioned)                          # None product/version not a fingerprint
+
+    # --- render ---------------------------------------------------------------
+    def test_nmap_report_shows_recon_hero(self):
+        h = self._report("nmap", [{"state": "open", "service": "ssh", "product": "OpenSSH", "version": "8.9"}])
+        self.assertIn("recon-hero", h)
+        self.assertIn("Open ports", h)
+        self.assertIn("does NOT assess", h)          # exposure != vulnerability honesty
+        self.assertNotIn("<script", h)
+
+    def test_trivy_report_shows_vuln_hero(self):
+        h = self._report("trivy", [
+            {"VulnerabilityID": "CVE-2021-1", "Severity": "CRITICAL", "PkgName": "log4j"},
+            {"VulnerabilityID": "CVE-2021-2", "Severity": "HIGH", "PkgName": "log4j"}])
+        self.assertIn("vuln-hero", h)
+        self.assertIn("sevbar", h)                    # stacked severity bar
+        self.assertIn("log4j — 2 issue", h)           # top package
+        self.assertIn("detection-only", h)            # honesty qualifier
+        self.assertNotIn("<script", h)
+
+    def test_clean_vuln_scan_never_says_secure(self):
+        h = self._report("trivy", [])
+        hero = h.split('class="hero vuln-hero"')[1].split("</div></div>")[0]
+        self.assertIn("No vulnerabilities of coloured", hero)
+        self.assertFalse(any(w in hero.lower() for w in ("secure", "safe", "clean")))
+
+    def test_recon_hero_counts_multi_host_exposure_pre_dedup(self):
+        # red-team B1: nmap findings carry no host id, so host-blind dedup collapses N
+        # hosts with an identical open-port fingerprint to one finding. The recon hero
+        # counts EXPOSURE from the pre-dedup list, so a multi-host scan is not undercounted
+        # to "1 open port", and a note explains the findings table de-duplicates.
+        dupe = {"id": "port-22-tcp", "Severity": "INFO", "state": "open", "service": "ssh",
+                "product": "OpenSSH", "version": "8.9", "Title": "22/tcp ssh open"}
+        h = self.server._render_report({
+            "schema_version": 1, "scanner": "nmap", "status": "success",
+            "source_type": "host", "target_ref": "10.0.0.0/24", "metadata": {},
+            "findings": [dict(dupe), dict(dupe)]})
+        self.assertIn("recon-hero", h)
+        self.assertIn(">2<", h)                                  # exposure counted pre-dedup
+        self.assertIn("ssh (2)", h)
+        self.assertIn("de-duplicates identical host:port", h)    # honest about the table
+
+    def test_recon_hero_single_host_has_no_dedup_note(self):
+        # distinct fingerprints do not collapse, so exposure == distinct and no note fires.
+        h = self.server._render_report({
+            "schema_version": 1, "scanner": "nmap", "status": "success",
+            "source_type": "host", "target_ref": "10.0.0.5", "metadata": {},
+            "findings": [{"id": "port-22-tcp", "state": "open", "service": "ssh", "Severity": "INFO", "Title": "22/tcp ssh open"},
+                         {"id": "port-80-tcp", "state": "open", "service": "http", "Severity": "INFO", "Title": "80/tcp http open"}]})
+        self.assertIn(">2<", h)
+        self.assertNotIn("de-duplicates identical host:port", h)
+
+    def test_non_recon_vuln_report_has_neither_hero(self):
+        h = self._report("nikto", [{"id": "1", "Severity": "MEDIUM", "Title": "x"}])
+        self.assertNotIn("recon-hero", h)
+        self.assertNotIn("vuln-hero", h)
+
+
 if __name__ == "__main__":
     unittest.main()

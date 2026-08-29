@@ -282,6 +282,52 @@ by best-effort parsing with a raw-transcript fallback.
   unparseable metasploit transcript falls back to the raw text; a nikto report shows no
   catalog banner.
 
+### P3d — Recon + vuln heroes (THIS SUB-PHASE)
+
+Two single-scanner exec-summary heroes, each computed from findings already captured, each
+mirroring the P3a/P3b/P3c add-a-hero pattern (the austere body is unchanged). Scope default
+(concrete): recon exposure hero = **nmap**; vuln severity hero = **trivy + nuclei**. Other
+recon tools (whatweb/dns/subfinder/amass) and syft (SBOM inventory) get their own heroes
+later — their data shapes differ.
+
+- **DA1 Recon exposure hero (nmap).** `_recon_exposure(findings)` → `(open_ports, services,
+  versioned)`: `open_ports` = count of open-port findings (`state == "open"`); `services` =
+  `{service: count}`; `versioned` = how many carry a product/version fingerprint. Exposure
+  is counted from the PRE-DEDUP finding list: nmap findings carry no host id, so host-blind
+  dedup would collapse N hosts with an identical open-port fingerprint to one and headline
+  a multi-host scan as "1 open port" (red-team B1); the hero counts open host:port pairs
+  across all hosts and notes when the findings table de-duplicates. The `.recon-hero` shows
+  the open-port count, the exposed-service breakdown, and an honesty
+  note: open ports are the reachable ATTACK SURFACE, and a TCP connect scan does NOT assess
+  the services' security (RB2/RB4 — never implies vulnerability from exposure).
+- **DA2 Vuln severity hero (trivy/nuclei).** `_vuln_summary(findings)` → `(severity_counts,
+  total, top_packages)`: `severity_counts` over the coloured severities; `total` = their
+  sum; `top_packages` = `[(pkg, finding_count), …]` desc from trivy `PkgName`, counting RAW coloured findings per package on the SAME basis as `total` so the headline and the package tally never disagree (red-team N1).
+  The `.vuln-hero` shows the total, a scriptless STACKED severity bar (segments sized by
+  count, coloured by the existing `--sev-*` tokens; each segment carries its severity+count in a
+  `title`, and an always-present TEXT legend below the bar carries every severity+count
+  visibly, never colour alone), and the top vulnerable packages. Qualifier "detection-only"
+  (carried from P2): a version/advisory match, not exploit-validated. A clean scan (total 0)
+  says so honestly, never "secure".
+- **DA3 Render + gating.** Heroes fill the shared `{exec_hero}` slot (`tls_hero or
+  macro_hero or msf_catalog or vuln_hero or recon_hero`); scanner sets are disjoint so at
+  most one fires. `_RECON_SCANNERS = {nmap}`, `_VULN_SCANNERS = {trivy, nuclei}`. A scanner
+  outside these shows no P3d hero. Unlike metasploit, the severity chrome is KEPT (a vuln
+  report IS a target assessment; nmap findings are INFO).
+- **DA4 Scriptless + a11y + scope.** Inline HTML + token colour, CSP unchanged, every count
+  and severity present as TEXT (never colour alone); the combined report is untouched.
+
+### Seams (P3d)
+
+- `_recon_exposure`: 3 open ports over 2 services + 2 versioned → correct counts; a report
+  with no open-port findings → (0, {}, 0); non-dict/closed findings ignored.
+- `_vuln_summary`: mixed-severity trivy findings → correct severity_counts + total; two CVEs
+  on one package → top_packages `[(pkg, 2)]`; a clean scan → ({}, 0, []); nuclei severity
+  counted; non-coloured (INFO/UNKNOWN) not counted.
+- render tests: an nmap report shows `.recon-hero` with the open-port count + the connect-
+  scan honesty note; a trivy report shows `.vuln-hero` with the stacked bar + top packages;
+  a nikto report shows neither; a clean trivy scan never says "secure".
+
 - **P4 — Mappings + evidence + SLA** (the old epic M3/M4/M5): CWE→ATT&CK/NIST,
   evidence blocks, auto SLA/benchmark from band.
 
