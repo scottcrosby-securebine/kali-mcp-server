@@ -78,6 +78,11 @@ class DirectOutputRedactionTests(unittest.TestCase):
         ("nikto x-auth-key contents",
          "+ Uncommon header(s) 'x-auth-key' found, with contents: REAL_SECRET_123abc.\n",
          "REAL_SECRET_123abc"),
+        # #74 red-team R2-2: a real colon-terminated Basic credential (base64-
+        # shaped) must redact even though the "Basic options:" label survives.
+        ("a colon-terminated Basic credential", "proxy log Basic dXNlcjpwYXNz: 401\n", "dXNlcjpwYXNz"),
+        # #74 red-team R2-4: X-Auth-Key header value in text must redact.
+        ("an X-Auth-Key header value", "X-Auth-Key: LEAKAUTHVALUE987xyz\n", "LEAKAUTHVALUE987xyz"),
     )
 
     # Ordinary output every one of these tools emits. Redaction must leave it
