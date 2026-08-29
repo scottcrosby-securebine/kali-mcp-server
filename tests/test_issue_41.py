@@ -36,11 +36,15 @@ class TheReportIsAFixFirstQueue(unittest.TestCase):
     def test_the_new_sections_and_honest_ordering_label_are_present(self):
         report = _combined(self.server, [_result([{"VulnerabilityID": "CVE-2021-44228",
                                                    "Severity": "HIGH", "Title": "x"}])])
-        for heading in ("Fix-first queue", "Package matrix", "CVE explorer",
+        for heading in ("Risk model", "Fix-first queue", "Package matrix", "CVE explorer",
                         "Web hardening", "Evidence appendix", "Methodology"):
             self.assertIn(heading, report)
-        # Ordering is labelled by what was collected, never called "risk".
-        self.assertIn("Prioritized by available signals", report)
+        # #86: ordering is now the auditable contextual-risk score. The honesty is
+        # preserved differently -- the model, its weights, and the fact that
+        # unknown inputs default conservative + flagged are all rendered.
+        self.assertIn("contextual risk", report)
+        self.assertIn("0.30", report)          # the exploit weight is shown
+        self.assertIn("assumed-reachable", report)  # unknown inputs are flagged
 
     def test_same_package_cves_collapse_to_one_upgrade_work_unit(self):
         report = _combined(self.server, [_result([
