@@ -25,39 +25,42 @@ register, remediation.yaml, baseline/history) is OUT.
 
 ## Wave 1 acceptance criteria
 
-- **M1.** `_contextual_risk(finding, exposure_score)` returns
-  `min(cvss_band, round(100*(0.30*exploit + 0.28*exposure + 0.24*reachability +
-  0.18*asset_value)))`. Inputs 0..1:
+- **M1.** `_contextual_risk(finding, exposure)` returns
+  `min(cvss_band, round(100*(0.52*exploit + 0.48*exposure)))`. Phase 1 scores the
+  two signals actually collected; reachability and asset_value are NOT in the
+  Phase-1 score — they join the formula in Phase 2 (#86 M2). Inputs 0..1:
   - `exploit`: KEV actively-exploited → 1.0; else EPSS probability; else 0.5
-    (unknown → conservative), tagged.
-  - `exposure`: from the nmap join (below).
-  - `reachability`: unknown → 1.0 (conservative), finding tagged `assumed-reachable`.
-  - `asset_value`: unknown → 1.0 (conservative), tagged `assumed-critical`.
-  - `cvss_band`: the CVSS-derived ceiling so the contextual score never exceeds
-    the raw CVSS band (a 9.8 caps the score's ceiling; context only lowers it).
-  The Phase-1 teaching case must hold (exposure is the live lever; reachability/
-  asset_value are constant this phase): an unexposed, internal CVSS-9.8 scores ~71
-  (High), while an exploited, internet-facing CVSS-7.5 scores 95 (its High-band
-  ceiling) — exposure and exploitation, not raw CVSS, set the order.
+    (unknown → conservative), tagged `exploit-unknown`.
+  - `exposure`: from the nmap per-host join (below).
+  - `cvss_band`: the CVSS-derived ceiling, one per severity band and set at the top
+    of that band's word so a score never renders a band above its CVSS severity:
+    Critical 100 / High 89 / Medium 69 / Low 39 / Info 14 / Unknown 69. When a
+    finding carries no Severity label the band is derived from its CVSS score.
+    CVSS caps the top; context only lowers from there.
+  The Phase-1 teaching case must hold (exposure is the live lever): an unexposed,
+  internal CVSS-9.8 (exploit 0.5, exposure 0.5) scores 50 (Medium), while an
+  exploited, internet-facing CVSS-7.5 (exploit 1.0, exposure 1.0) scores 89 (its
+  High-band ceiling) — exposure and exploitation, not raw CVSS, set the order.
 - **M2 exposure (half).** `_exposure_for(finding, inventory)` joins a CVE/web
-  finding to the nmap open-port/service inventory built from the same document:
-  a finding on a host/port that nmap saw open and externally reachable →
-  exposure 1.0 `internet-facing`; a host with no open-port evidence → 0.5
-  `exposure-unknown`; internal-only markers → lower. (Reachability half is Phase 2.)
+  finding to the set of hosts nmap saw with an open service, built from the same
+  document: a finding whose host nmap saw open → exposure 1.0 `internet-facing`;
+  a host with no open-port evidence → 0.5 `exposure-unknown`. `_host_of` extracts
+  the bare host (scheme/path/userinfo/port stripped) for the join. (Reachability
+  half is Phase 2.)
 - **M1 render.** Contextual risk is the primary sort key of the fix-first queue
   and the CVE explorer (replacing the severity/EPSS/KEV ordering). A **Risk model**
-  section renders the formula, the four weights, and a per-report list of which
-  inputs were defaulted-conservative (so every score is auditable).
+  section renders the formula, the two Phase-1 weights, and states that
+  reachability/asset_value join in Phase 2 (so every score is auditable).
 - **M7 honesty (partial).** The existing "not by risk … not collected" note is
-  replaced by one that names the model and the assumed inputs, keeping the
-  honesty (reachability/asset assumed-conservative, verify).
+  replaced by one that names the model and states that reachability/asset_value
+  are not scored this phase (Phase 2), keeping the honesty.
 - No new runtime dependency; inline CSS + existing tokens; theme-aware; the
   report stays self-contained and scriptless (CSP unchanged).
 
 ## Seams (wave 1)
 
-- `_contextual_risk` unit table incl. the two teaching cases (9.8-unreachable →
-  ~71/High; 7.5-exploited-facing → 95).
+- `_contextual_risk` unit table incl. the two teaching cases (9.8-unexposed →
+  50/Medium; 7.5-exploited-facing → 89/High) and the LOW→Low B3 regression.
 - `_exposure_for` join test (finding on an open nmap port → internet-facing;
   no inventory → unknown/0.5).
 - render test: fix-first queue ordered by contextual risk; Risk-model section

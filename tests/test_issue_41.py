@@ -43,8 +43,8 @@ class TheReportIsAFixFirstQueue(unittest.TestCase):
         # preserved differently -- the model, its weights, and the fact that
         # unknown inputs default conservative + flagged are all rendered.
         self.assertIn("contextual risk", report)
-        self.assertIn("0.30", report)          # the exploit weight is shown
-        self.assertIn("assumed-reachable", report)  # unknown inputs are flagged
+        self.assertIn("0.52", report)     # #86 phase-1 exploit weight is shown
+        self.assertIn("Phase 2", report)  # reachability/asset_value deferred, stated honestly
 
     def test_same_package_cves_collapse_to_one_upgrade_work_unit(self):
         report = _combined(self.server, [_result([
@@ -131,6 +131,60 @@ class OrderingSignals(unittest.TestCase):
         self.assertFalse(kev)
         self.assertEqual(0.0, epss)
         self.assertEqual(0.0, cvss)
+
+
+class ContextualRiskSeam(unittest.TestCase):
+    """#86 wave-1 Seams: pin the two teaching cases and the exposure join so a score
+    regression is caught by mutation-check, not just the render-structure tests."""
+
+    def setUp(self):
+        self.server, _ = load_server()
+        for name in ("_contextual_risk", "_exposure_for", "_risk_band_word", "_host_of"):
+            if not hasattr(self.server, name):
+                self.skipTest(f"{name} absent on this revision")
+
+    def test_exploited_internet_facing_7_5_scores_89_high(self):
+        # KEV -> exploit 1.0; nmap open host -> exposure 1.0; HIGH ceiling 89.
+        f = {"VulnerabilityID": "CVE-2021-44228", "Severity": "HIGH",
+             "KEV": "Actively exploited — fix now (KEV added 2021-12-10)",
+             "EPSS": "0.975 probability (0.99 percentile)", "CVSS": {"nvd": {"V3Score": 7.5}}}
+        r = self.server._contextual_risk(f, 1.0)
+        self.assertEqual(89, r["score"])
+        self.assertEqual("High", self.server._risk_band_word(r["score"]))
+
+    def test_unexposed_internal_9_8_scores_50_medium(self):
+        # unenriched -> exploit 0.5; unexposed -> exposure 0.5; CRITICAL ceiling 100.
+        f = {"VulnerabilityID": "CVE-2022-0001", "Severity": "CRITICAL",
+             "KEV": "Unknown — not enriched", "EPSS": "Not enriched", "CVSS": {"nvd": {"V3Score": 9.8}}}
+        r = self.server._contextual_risk(f, 0.5)
+        self.assertEqual(50, r["score"])
+        self.assertEqual("Medium", self.server._risk_band_word(r["score"]))
+        self.assertIn("exploit-unknown", r["assumed"])
+
+    def test_teaching_invariant_facing_7_5_outranks_internal_9_8(self):
+        facing = {"Severity": "HIGH", "KEV": "Actively exploited — now", "CVSS": {"nvd": {"V3Score": 7.5}}}
+        internal = {"Severity": "CRITICAL", "KEV": "Unknown — not enriched",
+                    "EPSS": "Not enriched", "CVSS": {"nvd": {"V3Score": 9.8}}}
+        self.assertGreater(self.server._contextual_risk(facing, 1.0)["score"],
+                           self.server._contextual_risk(internal, 0.5)["score"])
+
+    def test_low_severity_never_renders_above_low(self):
+        # #86 B3 regression: the old 0.42 constant floor made LOW render Medium.
+        f = {"Severity": "LOW", "KEV": "Unknown — not enriched", "EPSS": "Not enriched"}
+        r = self.server._contextual_risk(f, 0.5)
+        self.assertLessEqual(r["score"], 39)
+        self.assertIn(self.server._risk_band_word(r["score"]), ("Low", "Info"))
+
+    def test_exposure_join_is_per_host(self):
+        # #86 B1 regression: exposure must fire only for a finding on an open host.
+        self.assertEqual(1.0, self.server._exposure_for("10.0.10.5", {"10.0.10.5"})[0])
+        self.assertEqual(0.5, self.server._exposure_for("img:internal", {"10.0.10.5"})[0])
+        self.assertEqual(0.5, self.server._exposure_for("", set())[0])
+
+    def test_host_of_strips_scheme_port_userinfo(self):
+        self.assertEqual("10.0.10.5", self.server._host_of("https://10.0.10.5:443/x"))
+        self.assertEqual("10.0.10.5", self.server._host_of("10.0.10.5:22"))
+        self.assertEqual("h", self.server._host_of("https://user:pass@h/p"))
 
 
 if __name__ == "__main__":
