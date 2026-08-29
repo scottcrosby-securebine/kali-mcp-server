@@ -35,8 +35,10 @@ register, remediation.yaml, baseline/history) is OUT.
   - `asset_value`: unknown → 1.0 (conservative), tagged `assumed-critical`.
   - `cvss_band`: the CVSS-derived ceiling so the contextual score never exceeds
     the raw CVSS band (a 9.8 caps the score's ceiling; context only lowers it).
-  The teaching case must hold: an unreachable/unused CVSS-9.8 scores Medium; an
-  exploited, internet-facing CVSS-7.5 scores ~96.
+  The Phase-1 teaching case must hold (exposure is the live lever; reachability/
+  asset_value are constant this phase): an unexposed, internal CVSS-9.8 scores ~71
+  (High), while an exploited, internet-facing CVSS-7.5 scores 95 (its High-band
+  ceiling) — exposure and exploitation, not raw CVSS, set the order.
 - **M2 exposure (half).** `_exposure_for(finding, inventory)` joins a CVE/web
   finding to the nmap open-port/service inventory built from the same document:
   a finding on a host/port that nmap saw open and externally reachable →
@@ -55,7 +57,7 @@ register, remediation.yaml, baseline/history) is OUT.
 ## Seams (wave 1)
 
 - `_contextual_risk` unit table incl. the two teaching cases (9.8-unreachable →
-  Medium band; 7.5-exploited-facing → ~96).
+  ~71/High; 7.5-exploited-facing → 95).
 - `_exposure_for` join test (finding on an open nmap port → internet-facing;
   no inventory → unknown/0.5).
 - render test: fix-first queue ordered by contextual risk; Risk-model section
