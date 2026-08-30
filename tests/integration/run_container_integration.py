@@ -497,7 +497,7 @@ def main() -> int:
         expected = [item["name"] for item in contract["tools"] + contract["additions"]]
         actual = [item.get("name") for item in listed]
         require(actual == expected, f"tool contract drift: expected {expected}, got {actual}")
-        print("PASS MCP initialize/tools/list: 42 preserved + 6 additions")
+        print("PASS MCP initialize/tools/list: 42 preserved + 7 additions")
 
         for tool_name in expected:
             default_result = client.call(tool_name, {})

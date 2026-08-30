@@ -60,13 +60,15 @@ class TranscriptRunsThatGenuinelyDifferAreKept(unittest.TestCase):
 
     def test_identical_reruns_still_collapse(self):
         # The immunity the carve-out was built for must survive the fix: six
-        # whois lookups differing only by the update stamp render one card.
+        # raw-transcript runs differing only by run_command's own per-run
+        # "(truncated N additional lines)" counter render one card. (whois left
+        # this family for a structured parser in #89; fierce still exercises it.)
         bodies = [
-            f"✅ Scan completed successfully:\n\nDomain: example.com\n"
-            f">>> Last update of whois database: 2026-08-27T10:0{n}:00Z <<<\n"
+            f"✅ Scan completed successfully:\n\nZone: example.com\n\n"
+            f"... (truncated {n} additional lines)"
             for n in range(6)
         ]
-        docs = [_result("whois", "example.com", self._transcript("whois", "example.com", b))
+        docs = [_result("fierce", "example.com", self._transcript("fierce", "example.com", b))
                 for b in bodies]
         self.assertEqual(1, self._combined(docs).count("<article>"))
 
