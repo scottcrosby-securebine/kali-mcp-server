@@ -18,10 +18,19 @@ findings to OWASP Top-10 (2021) + WSTG, per-endpoint, for app/dev teams.
   Title/id/evidence, following the `_MACRO_ATTACK_SUBSTR` (~3966) OBSERVED-ONLY
   discipline. Never inferred from scanner name alone.
 
-## Honesty rules (from #88 caveats — non-negotiable)
-- Findings a scanner cannot fully prove (IDOR, A09 logging) render as
-  "requires manual confirmation," never as confirmed.
-- OWASP categories with no exercising finding render "not exercised," NEVER "secure".
+## Honesty rules (from #88 caveats + Scott O1 ruling 2026-08-30 — non-negotiable)
+- A keyword classifier cannot tell a vulnerability from a defence being present
+  ("XSS found" vs "X-XSS-Protection header present"), so it FLAGS, never confirms.
+- The coverage grid reads "flagged for review" / "not flagged" — never
+  "exercised" and never "secure".
+- A keyword-mapped finding renders as a confirmed severity ONLY when a scanner
+  that actively tests the weakness (nuclei/nikto/sqlmap/wpscan) produced it;
+  every other mapped finding renders "requires manual confirmation".
+- Findings a detection-only scan cannot prove (IDOR/A09) also render "requires
+  manual confirmation".
+- Dir-bust path Titles never classify (a filename is not evidence of a class);
+  they own the discovered-content lane. Tokens match on WORD BOUNDARIES so a
+  slug like wp-sqlite-db does not forge A03.
 - Unmapped findings land in an "unmapped / manual review" bucket, never forced into a category.
 
 ## Web-scanner subset (feeders)
