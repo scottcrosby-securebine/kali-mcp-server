@@ -133,6 +133,16 @@ class OwaspClassifyTests(unittest.TestCase):
         # web scanner: mapping is observed-text-only, never inferred from tool.
         self.assertIsNone(self.server._owasp_classify({"Title": "harmless note", "id": "nikto-1"}))
 
+    def test_acronym_tokens_match_on_word_boundary_not_substring(self):
+        # B2 (red team): short tokens must not collide inside benign words -- a
+        # plugin slug or path fragment must not forge a Top-10 category.
+        c = self.server._owasp_classify
+        self.assertIsNone(c({"Title": "Authentication Bypass in wp-sqlite-db 1.0"}))  # sqli != sqlite
+        self.assertIsNone(c({"Title": "Corridor access control panel"}))             # idor != corridor
+        # ...but the acronym as a real word still classifies, incl. plural forms.
+        self.assertEqual(("A03", "WSTG-INPV-05"), c({"Title": "SQLi confirmed on id"}))
+        self.assertEqual(("A07", "WSTG-ATHN-02"), c({"Title": "Default credentials found"}))
+
 
 def _result(scanner, target, findings):
     return {
