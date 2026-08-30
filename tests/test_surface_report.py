@@ -63,6 +63,15 @@ class MaskEmailTests(unittest.TestCase):
     def test_never_raises_on_non_string(self):
         self.assertEqual("123", self.server._mask_email(123))
 
+    def test_masks_every_email_in_a_string(self):
+        # red-team R-B2: masking must cover a free-text field, not only a lone
+        # address -- so it renders safely over a whois line or an nmap banner.
+        out = self.server._mask_email("primary alice@a.com and ops+abuse@b.io here")
+        self.assertIn("a***@a.com", out)
+        self.assertIn("o***@b.io", out)          # plus-tagged address still masked
+        self.assertNotIn("alice@a.com", out)
+        self.assertNotIn("ops+abuse@b.io", out)
+
 
 class ParseWhoisTests(unittest.TestCase):
     @classmethod
@@ -87,6 +96,24 @@ class ParseWhoisTests(unittest.TestCase):
         self.assertEqual([], self.server._parse_whois("no structured lines here"))
         self.assertEqual([], self.server._parse_whois(""))
         self.assertEqual([], self.server._parse_whois(None))
+
+    def test_scales_linearly_on_many_status_lines(self):
+        # red-team R-N2: an `x not in growing_list` membership scan made a hostile
+        # whois with thousands of unique Status lines quadratic. Gate on the SCALING
+        # RATIO, not wall-clock, so a slow CI runner does not flake (memory:
+        # wall-clock-perf-asserts-flake-on-ci). Linear ~2x; the O(n^2) bug was ~4x.
+        import time
+
+        def elapsed(n):
+            text = "Registrar: r\n" + "".join(f"Domain Status: s{i}\n" for i in range(n))
+            start = time.perf_counter()
+            self.server._parse_whois(text)
+            return time.perf_counter() - start
+
+        elapsed(2000)                       # warmup
+        t1 = elapsed(4000)
+        t2 = elapsed(8000)
+        self.assertLess(t2, t1 * 3.0, f"_parse_whois superlinear: {t1:.3f}s -> {t2:.3f}s")
 
 
 class DnsHygieneTests(unittest.TestCase):
@@ -124,6 +151,17 @@ class DnsHygieneTests(unittest.TestCase):
     def test_never_raises_on_junk(self):
         self.assertEqual(3, len(self.server._dns_hygiene("garbage")))
         self.assertEqual(3, len(self.server._dns_hygiene([None, "x", 5])))
+
+    def test_wrong_type_or_negative_statement_never_forges_a_verdict(self):
+        # red-team R-B1: the match is TYPE- and VALUE-scoped. An A record whose
+        # address happens to read `v=spf1`, and a TXT that merely SAYS "zone
+        # transfer prohibited", must not forge SPF or AXFR.
+        checks = self._by_check([
+            {"type": "A", "name": "example.com", "address": "v=spf1 mail"},
+            {"type": "TXT", "name": "example.com", "strings": "zone transfer prohibited"},
+        ])
+        self.assertFalse(checks["SPF"]["observed"])    # A-record address is not an SPF record
+        self.assertFalse(checks["Zone"]["observed"])   # a TXT saying so is not a zone transfer
 
 
 class RenderSurfaceTests(unittest.TestCase):
@@ -216,6 +254,34 @@ class RenderSurfaceTests(unittest.TestCase):
         html = self._render([])
         self.assertIn("External attack-surface report", html)
         self.assertIn("No nmap host captures", html)
+
+    def test_dns_recon_only_subdomain_appears_in_table(self):
+        # Spec P1: a host name only dnsrecon discovered (no subfinder/amass row)
+        # must still reach the subdomain table.
+        dns = self.server._parse_dnsrecon_json(json.dumps([
+            {"type": "A", "name": "mail.corp.example.com", "address": "10.0.0.9"},
+        ]))
+        html = self._render([_result("dns_recon", "example.com", dns)])
+        self.assertIn("mail.corp.example.com", html)
+
+    def test_registrar_free_text_email_masked_in_render(self):
+        # red-team R-B2: an email embedded in a whois FIELD value (not the separate
+        # abuse-email line) must render masked.
+        whois = self.server._parse_whois(
+            "Registrar: Contact ops+abuse@registrar.example for issues\n"
+            "Domain Status: ok\n")
+        html = self._render([_result("whois", "example.com", whois)])
+        self.assertNotIn("ops+abuse@registrar.example", html)
+        self.assertIn("o***@registrar.example", html)
+
+    def test_nmap_service_banner_email_masked_in_render(self):
+        # red-team R-B2: an email in an nmap service/product banner must render masked.
+        html = self._render([_result("nmap", "example.com", [
+            {"id": "port-25-tcp", "Severity": "INFO", "Title": "25/tcp smtp open",
+             "state": "open", "service": "smtp", "product": "postmaster root@mail.example"},
+        ])])
+        self.assertNotIn("root@mail.example", html)
+        self.assertIn("r***@mail.example", html)
 
 
 class SurfaceReportAggregationTests(unittest.TestCase):
