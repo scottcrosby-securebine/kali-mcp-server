@@ -497,12 +497,17 @@ def main() -> int:
         expected = [item["name"] for item in contract["tools"] + contract["additions"]]
         actual = [item.get("name") for item in listed]
         require(actual == expected, f"tool contract drift: expected {expected}, got {actual}")
-        print("PASS MCP initialize/tools/list: 42 preserved + 7 additions")
+        # Counts come from the fixture, never a literal: a hardcoded total goes
+        # stale the moment an addition lands and makes the gate print a false
+        # statement about the contract it just verified.
+        print(f"PASS MCP initialize/tools/list: {len(contract['tools'])} preserved "
+              f"+ {len(contract['additions'])} additions")
 
         for tool_name in expected:
             default_result = client.call(tool_name, {})
             require(isinstance(default_result, str), f"{tool_name} default call was not text")
-        print("PASS MCP tools/call: all 48 declared tools return text for default arguments")
+        print(f"PASS MCP tools/call: all {len(expected)} declared tools "
+              "return text for default arguments")
 
         before_confined = set(results.iterdir())
         confined = client.call("syft_sbom", {"target_ref": "../escape", "source_type": "dir"})

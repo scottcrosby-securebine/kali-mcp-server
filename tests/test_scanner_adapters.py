@@ -636,6 +636,17 @@ class DnsReconCaptureTests(unittest.TestCase):
             ("dns_recon", "dns_recon", "-j", json.dumps([{"type": "A", "name": "x.com", "address": "1.1.1.1"}]), ("x.com",)),
             ("subfinder_scan", "subfinder", "-o", "a.x.com\nb.x.com", ("x.com",)),
             ("amass_enum", "amass", None, "FQDN:\n\na.x.com\n", ("x.com",)),
+            # #90: both AD/SMB feeders left the raw-text family for structured
+            # parsers. Capture must still leave the operator text byte-identical
+            # and add no argument -- and, critically, the scanner LABEL must be
+            # exactly what `_ADSMB_SCANNERS` and `_tool_version_metadata` key on.
+            # Nothing else pins this seam: mutating the label to "crackmapexecX"
+            # kills the whole posture spine with the suite still green.
+            ("enum4linux_scan", "enum4linux", None,
+             "[+] Minimum password length: 7\n", ("10.0.0.5",)),
+            ("crackmapexec_scan", "crackmapexec", None,
+             "SMB  10.0.0.5  445  DC01  [*] Win2019 (name:DC01) (domain:CORP) "
+             "(signing:True) (SMBv1:False)\n", ("10.0.0.5",)),
         ]
         for tool, scanner, flag, sample, args in cases:
             with self.subTest(tool=tool):
