@@ -245,6 +245,13 @@ class RenderWebappTests(unittest.TestCase):
         vuln = self._render([_result("nuclei", "http://t/", [dict(finding)])])
         self.assertIn('class="sev sev-high"', vuln)           # a real vuln scanner confirms
         self.assertNotIn("conf conf-heuristic", vuln)
+        # ...but even a vuln scanner at INFO severity (a present-header detection)
+        # is only flagged, never confirmed ("at real severity", O1 ruling).
+        info = self._render([_result("nuclei", "http://t/", [
+            {"id": "i", "Title": "X-Frame-Options header present", "Severity": "INFO",
+             "evidence": "SAMEORIGIN"}])])
+        self.assertIn("conf conf-heuristic", info)
+        self.assertNotIn('class="sev ', info.split("Discovered content")[0])
 
     def test_render_sqlmap_block_absent_without_sqlmap_finding(self):
         html = self._render([_result("nikto", "http://t/", [
