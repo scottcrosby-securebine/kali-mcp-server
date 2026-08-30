@@ -72,6 +72,27 @@ class MaskEmailTests(unittest.TestCase):
         self.assertNotIn("alice@a.com", out)
         self.assertNotIn("ops+abuse@b.io", out)
 
+    def test_scales_linearly_on_hostile_input(self):
+        # red-team RT-F1: the old domain class `[A-Za-z0-9.\\-]+\\.` overlapped and
+        # backtracked O(n^2). Gate on the SCALING RATIO, not wall-clock (memory:
+        # wall-clock-perf-asserts-flake-on-ci). Linear ~2x; the bug was ~4x.
+        import time
+
+        def elapsed(n):
+            s = "a" * n + "@" + "a." * n
+            start = time.perf_counter()
+            self.server._mask_email(s)
+            return time.perf_counter() - start
+
+        elapsed(2000)                       # warmup
+        t1 = elapsed(4000)
+        t2 = elapsed(8000)
+        self.assertLess(t2, t1 * 3.0, f"_mask_email superlinear: {t1:.3f}s -> {t2:.3f}s")
+
+    def test_masks_ip_literal_domain(self):
+        # red-team RT-F4 (the part we close): IP-literal domains are covered.
+        self.assertEqual("u***@[10.0.0.1]", self.server._mask_email("user@[10.0.0.1]"))
+
 
 class ParseWhoisTests(unittest.TestCase):
     @classmethod
@@ -162,6 +183,16 @@ class DnsHygieneTests(unittest.TestCase):
         ])
         self.assertFalse(checks["SPF"]["observed"])    # A-record address is not an SPF record
         self.assertFalse(checks["Zone"]["observed"])   # a TXT saying so is not a zone transfer
+
+    def test_axfr_not_forged_by_a_failed_transfer_value(self):
+        # red-team RT-F3: a captured zone_transfer field is Python-truthy even for
+        # "failed"/"no"/"0", so a bare truthiness test forged AXFR from a FAILED
+        # transfer. Only an explicit success marker (or an axfr-typed record) flags.
+        for bad in ("failed", "no", "0", "false", ""):
+            checks = self._by_check([{"type": "NS", "name": "example.com", "zone_transfer": bad}])
+            self.assertFalse(checks["Zone"]["observed"], f"forged from {bad!r}")
+        ok = self._by_check([{"type": "NS", "name": "example.com", "zone_transfer": "success"}])
+        self.assertTrue(ok["Zone"]["observed"])
 
 
 class RenderSurfaceTests(unittest.TestCase):
@@ -282,6 +313,28 @@ class RenderSurfaceTests(unittest.TestCase):
         ])])
         self.assertNotIn("root@mail.example", html)
         self.assertIn("r***@mail.example", html)
+
+    def test_email_in_dns_name_cname_target_and_tech_masked(self):
+        # red-team RT-F2: the R-B2 fix wrapped only a few fields. An email hidden in
+        # a dnsrecon record NAME, a CNAME TARGET, or a whatweb tech label must also
+        # render masked -- masking now runs at the single render chokepoint.
+        dns = self.server._parse_dnsrecon_json(json.dumps([
+            {"type": "A", "name": "ops@corp.example", "address": "1.2.3.4"},
+            {"type": "CNAME", "name": "x.example.com", "target": "admin@stale.example"},
+        ]))
+        html = self._render([
+            _result("nmap", "example.com", [
+                {"id": "p80", "Severity": "INFO", "Title": "80/tcp http open",
+                 "state": "open", "service": "http"}]),
+            _result("dns_recon", "example.com", dns),
+            _result("whatweb", "http://example.com",
+                    [{"id": "t", "Severity": "INFO", "Title": "root@mail.example detected"}]),
+        ])
+        for raw in ("ops@corp.example", "admin@stale.example", "root@mail.example"):
+            self.assertNotIn(raw, html)
+        self.assertIn("o***@corp.example", html)     # dnsrecon A-record name
+        self.assertIn("a***@stale.example", html)    # CNAME takeover target
+        self.assertIn("r***@mail.example", html)     # whatweb tech label
 
 
 class SurfaceReportAggregationTests(unittest.TestCase):
