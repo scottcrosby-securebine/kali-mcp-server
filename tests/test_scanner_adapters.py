@@ -317,6 +317,50 @@ class NmapCaptureTests(unittest.TestCase):
         self.assertNotIn("port-8081-tcp", by_id)
         self.assertEqual("http-proxy", by_id["port-8080-tcp"]["service"])
 
+    DECOY = '<?xml version="1.0"?>\n<!--<!DOCTYPE decoy>-->\n'
+
+    def test_a_doctype_decoy_in_a_comment_does_not_hide_the_real_one(self):
+        """#104 review. A comment is legal in the prolog BEFORE the doctype, so
+        a decoy `<!DOCTYPE` inside one consumed a guard that examined only the
+        first occurrence — hiding a live internal subset or external ID behind
+        it. Each payload below was ACCEPTED by that version and parsed.
+
+        The ATTLIST case is why the subset rule cannot be narrowed to entities:
+        expat applies a subset's attribute defaults, so a document carrying
+        `<state/>` with no attributes was handed back as an OPEN PORT with
+        attacker-chosen service text — a fabricated finding from DTD content.
+        """
+        attlist = (self.DECOY + '<!DOCTYPE nmaprun [<!ATTLIST state state CDATA "open">'
+                   '<!ATTLIST service name CDATA "INJECTED-BY-TARGET">]>'
+                   '<nmaprun><host><ports><port protocol="tcp" portid="9999">'
+                   '<state/><service/></port></ports></host></nmaprun>')
+        self.assertIsNone(self.server._safe_xml_root(attlist))
+        self.assertEqual([], self.server._parse_nmap_xml(attlist))
+
+        for payload in (
+            self.DECOY + '<!DOCTYPE nmaprun [<!ELEMENT nmaprun ANY>]><nmaprun/>',
+            self.DECOY + '<!DOCTYPE nmaprun SYSTEM "file:///etc/passwd"><nmaprun/>',
+            self.DECOY + '<!DOCTYPE nmaprun PUBLIC "-//X//EN" "x.dtd"><nmaprun/>',
+            '<?ok <!DOCTYPE decoy> ?>\n<!DOCTYPE nmaprun [<!ELEMENT n ANY>]><nmaprun/>',
+        ):
+            with self.subTest(payload=payload[30:70]):
+                self.assertIsNone(self.server._safe_xml_root(payload))
+
+    def test_billion_laughs_behind_a_decoy_is_refused(self):
+        """Billion-laughs hidden behind a `<!DOCTYPE` decoy in a prolog comment.
+
+        This does NOT isolate the `<!ENTITY` rule: the payload also carries an
+        internal subset, so with the entity rule mutated away the subset rule
+        still refuses it. That redundancy is real and is documented on the guard
+        — an entity is only legal inside a subset. The test pins the composite
+        behaviour for the decoy shape, which is what regressed.
+        """
+        lolz = (self.DECOY + '<!DOCTYPE nmaprun [<!ENTITY a "aaaaaaaaaa">'
+                '<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">'
+                '<!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">]>'
+                '<nmaprun><x>&c;</x></nmaprun>')
+        self.assertIsNone(self.server._safe_xml_root(lolz))
+
     def test_the_doctype_guard_still_refuses_a_declared_entity(self):
         """The fix must not buy nmap back by disarming the XXE guard. A doctype
         naming an external entity is rejected whether or not it is referenced."""
