@@ -105,6 +105,17 @@ class ParserTests(unittest.TestCase):
         self.assertIn("CVE-2022-9999", theme["reference"])
         self.assertIn("twentytwenty", theme["Title"])
 
+    def test_parse_wpscan_parent_theme_vulns_captured(self):
+        # B6 (red team): a child active theme's CVEs live on its parent theme,
+        # nested under `parents`; those must not be dropped.
+        js = json.dumps({"main_theme": {"slug": "my-child-theme", "vulnerabilities": [],
+            "parents": [{"slug": "divi-parent", "vulnerabilities": [
+                {"title": "Parent theme RCE", "references": {"cve": ["2021-1234"]}}]}]}})
+        findings = self.server._parse_wpscan(js)
+        parent = next(f for f in findings if "Parent theme RCE" in f["Title"])
+        self.assertEqual("HIGH", parent["Severity"])
+        self.assertIn("divi-parent", parent["Title"])
+
     def test_parse_wpscan_non_dict_is_empty(self):
         self.assertEqual([], self.server._parse_wpscan("not json"))
         self.assertEqual([], self.server._parse_wpscan("[]"))
