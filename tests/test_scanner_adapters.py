@@ -280,6 +280,66 @@ class NmapCaptureTests(unittest.TestCase):
             with self.subTest(payload=payload[:20]):
                 self.assertEqual([], self.server._parse_nmap_xml(payload))
 
+    def test_an_internal_subset_is_refused_even_with_no_entity_declared(self):
+        """The internal subset is the only place a document may declare an
+        entity, so the guard rejects the subset wholesale rather than scanning
+        it for keywords a later XML feature could dodge.
+
+        Asserted against `_safe_xml_root`, NOT `_parse_nmap_xml`: a subset-only
+        document carries no <host>, so the parser returns [] whether the guard
+        fired or not, and an assertion through it cannot fail. Mutating the
+        subset check away is caught here and nowhere else.
+        """
+        subset = '<!DOCTYPE nmaprun [<!ELEMENT nmaprun ANY>]><nmaprun/>'
+        self.assertIsNone(self.server._safe_xml_root(subset))
+        # Sanity: without the subset the same document is accepted, so the
+        # rejection above is the guard's doing and not a parse failure.
+        self.assertIsNotNone(self.server._safe_xml_root('<nmaprun/>'))
+
+    def test_real_nmap_output_carries_a_doctype_and_still_parses(self):
+        """#104. Real `nmap -oX` emits `<!DOCTYPE nmaprun>` on line 2, so a guard
+        that refuses the bare doctype token drops EVERY nmap capture.
+
+        The fixture is verbatim output from the pinned image's nmap 7.99
+        (`docker run --entrypoint nmap kali-mcp-server:phase2 -sT -Pn -p
+        8080,8081 127.0.0.1 -oX -`), not a hand-written sample. The whole class
+        of defect this pins exists because `SAMPLE` above was authored by hand
+        and omits the doctype the real binary always emits.
+        """
+        real = (Path(__file__).parent / "fixtures" / "scanners"
+                / "nmap-real-doctype.xml").read_text(encoding="utf-8")
+        self.assertIn("<!DOCTYPE nmaprun>", real)
+
+        findings = self.server._parse_nmap_xml(real)
+        by_id = {finding["id"]: finding for finding in findings}
+        # The open port is captured; the closed one is not a finding.
+        self.assertIn("port-8080-tcp", by_id)
+        self.assertNotIn("port-8081-tcp", by_id)
+        self.assertEqual("http-proxy", by_id["port-8080-tcp"]["service"])
+
+    def test_the_doctype_guard_still_refuses_a_declared_entity(self):
+        """The fix must not buy nmap back by disarming the XXE guard. A doctype
+        naming an external entity is rejected whether or not it is referenced."""
+        xxe = ('<?xml version="1.0"?>\n<!DOCTYPE nmaprun '
+               '[<!ENTITY x SYSTEM "file:///etc/passwd">]>\n'
+               '<nmaprun><host><ports><port protocol="tcp" portid="80">'
+               '<state state="open"/></port></ports></host></nmaprun>')
+        self.assertIsNone(self.server._safe_xml_root(xxe))
+        self.assertEqual([], self.server._parse_nmap_xml(xxe))
+
+    def test_a_doctype_naming_an_external_dtd_is_refused(self):
+        """A doctype with an ExternalID declares nothing inline but points the
+        parser off the document. ElementTree does not fetch one, so this is
+        defence in depth rather than a live hole -- pinned because the guard
+        implements it, and unpinned rejection surface is how the over-rejection
+        in #104 survived unnoticed."""
+        for external in (
+            '<!DOCTYPE nmaprun SYSTEM "http://example.invalid/n.dtd"><nmaprun/>',
+            '<!DOCTYPE nmaprun PUBLIC "-//X//DTD//EN" "n.dtd"><nmaprun/>',
+        ):
+            with self.subTest(external=external[:40]):
+                self.assertIsNone(self.server._safe_xml_root(external))
+
     def test_tool_text_return_is_unchanged_and_result_is_captured(self):
         captured = {}
 
