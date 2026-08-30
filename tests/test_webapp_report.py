@@ -164,6 +164,14 @@ class RenderWebappTests(unittest.TestCase):
         }
         return self.server._render_report(document)
 
+    def test_report_carries_the_heuristic_limitation_caveat(self):
+        # B4 (accepted, documented): the report must tell the reader the OWASP
+        # mapping is a keyword heuristic to verify against evidence.
+        html = self._render([_result("nuclei", "http://t/",
+                                      [{"id": "n", "Title": "SQL injection", "Severity": "HIGH"}])])
+        self.assertIn("keyword heuristic", html)
+        self.assertIn("verify every OWASP row against its evidence", html)
+
     def test_dirbust_path_never_forges_an_owasp_category(self):
         # B1 (red team): a discovered path whose name contains a vuln token
         # (/old-sqli-notes/, /ssrf-docs/) must NOT token-match A03/A10 and mark

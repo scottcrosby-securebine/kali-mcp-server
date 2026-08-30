@@ -33,6 +33,19 @@ findings to OWASP Top-10 (2021) + WSTG, per-endpoint, for app/dev teams.
   slug like wp-sqlite-db does not forge A03.
 - Unmapped findings land in an "unmapped / manual review" bucket, never forced into a category.
 
+## Known limitation (accepted — Scott, 2026-08-30, ship + document)
+The OWASP classifier is a keyword heuristic and is POLARITY-BLIND: it matches a
+category token in the finding text but cannot tell a vulnerability from a control
+being reported present ("XSS found" vs "X-XSS-Protection header present"). The
+"flag, not confirm" model (grid says "flagged for review"; confirmed severity
+only from a vuln scanner at non-INFO severity) closes the common cases but NOT
+all: a scanner adapter that stamps a real severity on a present-control note
+(e.g. `_parse_nikto_json` marks any named entry MEDIUM regardless of polarity)
+can render such a finding as a confirmed MEDIUM in the per-endpoint table. This
+is accepted as a documented limitation, like the #98 redaction fail-safe: the
+report tells the reader to verify every OWASP row against its evidence, and the
+grid never asserts a category "confirmed" or "secure". Red-team B4.
+
 ## Web-scanner subset (feeders)
 Structured-capture today: nikto, nuclei, whatweb, wafw00f, dirb, gobuster, ffuf.
 Net-new this phase: sqlmap, wpscan, wfuzz.
