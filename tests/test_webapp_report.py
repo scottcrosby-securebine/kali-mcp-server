@@ -154,6 +154,20 @@ class RenderWebappTests(unittest.TestCase):
         }
         return self.server._render_report(document)
 
+    def test_dirbust_path_never_forges_an_owasp_category(self):
+        # B1 (red team): a discovered path whose name contains a vuln token
+        # (/old-sqli-notes/, /ssrf-docs/) must NOT token-match A03/A10 and mark
+        # the category exercised -- a filename is not evidence of the class.
+        for scanner in ("dirb", "gobuster", "ffuf", "wfuzz"):
+            out = self._render([_result(scanner, "http://t/", [
+                {"id": "d1", "Title": "/old-sqli-notes/", "Severity": "INFO", "evidence": "code=200"},
+                {"id": "d2", "Title": "/ssrf-docs/", "Severity": "INFO", "evidence": "code=200"},
+            ])])
+            # every OWASP category stays a miss -- none forged exercised from a path
+            self.assertEqual(0, out.count("owasp-hit"), scanner)
+            self.assertEqual(10, out.count("owasp-miss"), scanner)
+            self.assertNotIn("A03 Injection</td><td>WSTG", out, scanner)
+
     def test_render_grid_endpoints_sqlmap_and_honesty(self):
         results = [
             _result("sqlmap", "http://t/", [{
