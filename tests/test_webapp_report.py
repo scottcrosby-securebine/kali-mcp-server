@@ -93,6 +93,18 @@ class ParserTests(unittest.TestCase):
         self.assertEqual("INFO", users["Severity"])
         self.assertIn("admin", users["Title"])
 
+    def test_parse_wpscan_active_theme_vulns_captured(self):
+        # B5 (red team): wpscan reports the RUNNING theme under `main_theme`, not
+        # in `themes`; a vulnerable active theme must not be dropped.
+        js = json.dumps({"main_theme": {"slug": "twentytwenty",
+            "vulnerabilities": [{"title": "Active theme RCE", "fixed_in": "1.9",
+                                 "references": {"cve": ["2022-9999"]}}]}})
+        findings = self.server._parse_wpscan(js)
+        theme = next(f for f in findings if "Active theme RCE" in f["Title"])
+        self.assertEqual("HIGH", theme["Severity"])         # CVE-referenced
+        self.assertIn("CVE-2022-9999", theme["reference"])
+        self.assertIn("twentytwenty", theme["Title"])
+
     def test_parse_wpscan_non_dict_is_empty(self):
         self.assertEqual([], self.server._parse_wpscan("not json"))
         self.assertEqual([], self.server._parse_wpscan("[]"))
