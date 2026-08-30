@@ -203,8 +203,8 @@ class RenderWebappTests(unittest.TestCase):
         # OWASP coverage grid, with all ten categories and honest empty verdict.
         self.assertIn("OWASP Top-10 (2021) coverage", html)
         self.assertIn("A03 Injection", html)
-        self.assertIn("not exercised", html)          # A02/A04/... are untouched
-        self.assertIn("exercised", html)
+        self.assertIn("not flagged", html)            # A02/A04/... are untouched
+        self.assertIn("flagged for review", html)  # a mapped category is flagged, not confirmed
 
         # Per-endpoint rows with WSTG ids sourced from the classification table.
         self.assertIn("WSTG-INPV-05", html)           # sqlmap -> A03
@@ -227,17 +227,36 @@ class RenderWebappTests(unittest.TestCase):
         # Honesty: an empty category is never called "secure".
         self.assertNotIn("<td>secure</td>", html)
 
+    def test_non_vuln_scanner_finding_flagged_not_confirmed(self):
+        # B3 (red team): the classifier cannot tell "XSS found" from "X-XSS-
+        # Protection header present", so a keyword-mapped finding from a scanner
+        # that does NOT actively test the weakness (whatweb/wafw00f) is flagged
+        # for manual review, never rendered as a confirmed-severity vuln -- even
+        # at HIGH severity. A real vuln scanner (nuclei) at the same severity IS
+        # rendered confirmed. The grid never says "exercised", only "flagged".
+        finding = {"id": "x", "Title": "SQL injection possible", "Severity": "HIGH",
+                   "evidence": "reflected in response"}
+        # wafw00f is a web scanner but not a vuln scanner, and (unlike whatweb) it
+        # lands only in the OWASP table -- so the verdict chip is unambiguous.
+        tech = self._render([_result("wafw00f", "http://t/", [dict(finding)])])
+        self.assertIn("conf conf-heuristic", tech)            # manual-review verdict chip
+        self.assertNotIn('class="sev sev-high"', tech)        # NOT a confirmed HIGH chip
+        self.assertNotIn("exercised", tech)                   # grid reframed to flagged
+        vuln = self._render([_result("nuclei", "http://t/", [dict(finding)])])
+        self.assertIn('class="sev sev-high"', vuln)           # a real vuln scanner confirms
+        self.assertNotIn("conf conf-heuristic", vuln)
+
     def test_render_sqlmap_block_absent_without_sqlmap_finding(self):
         html = self._render([_result("nikto", "http://t/", [
             {"id": "n1", "Title": "x-frame-options header missing", "Severity": "MEDIUM"}])])
         self.assertIn("No SQL injection was confirmed", html)
-        self.assertIn("not exercised", html)
+        self.assertIn("not flagged", html)
         self.assertNotIn("<td>secure</td>", html)
 
-    def test_render_empty_results_all_not_exercised(self):
+    def test_render_empty_results_all_not_flagged(self):
         html = self._render([])
-        # Every one of the ten categories renders "not exercised", none "secure".
-        self.assertEqual(10, html.count("<td>not exercised</td>"))
+        # Every one of the ten categories renders "not flagged", none "secure".
+        self.assertEqual(10, html.count("<td>not flagged</td>"))
         self.assertNotIn("<td>secure</td>", html)
 
 
