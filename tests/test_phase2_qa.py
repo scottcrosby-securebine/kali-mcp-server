@@ -303,12 +303,21 @@ class PemRedosTests(unittest.TestCase):
 
     def test_unpaired_pem_openers_stay_linear(self):
         import time
-        # unbounded [\s\S]*? was O(n^2): 4000 openers ~2s, growing. Bounded {0,20000}
-        # -> linear. 8000 openers must finish well under the guard.
-        payload = "-----BEGIN PRIVATE KEY-----\n" * 8000
-        start = time.time()
-        self.server._redact_scanner_data(payload)
-        self.assertLess(time.time() - start, 2.5, "PEM pattern went quadratic")
+        # unbounded [\s\S]*? was O(n^2); bounded {0,20000} -> linear. Gate on the
+        # SCALING RATIO, not an absolute wall-clock: a wall-clock bound is machine-
+        # dependent and flaked on a slow CI runner (3.2s vs a 2.5s bound) while the
+        # pattern was provably linear. Doubling the openers ~doubles a linear run
+        # (ratio ~2) and ~quadruples a quadratic one (ratio ~4); 3.0 sits between.
+        def elapsed(n):
+            payload = "-----BEGIN PRIVATE KEY-----\n" * n
+            self.server._redact_scanner_data(payload[:1])  # warm the regex cache
+            start = time.time()
+            self.server._redact_scanner_data(payload)
+            return time.time() - start
+        t1 = elapsed(2000)
+        t2 = elapsed(4000)
+        self.assertLess(t2, t1 * 3.0,
+                        f"PEM pattern went superlinear: {t1:.3f}s -> {t2:.3f}s")
 
     def test_real_key_still_redacted(self):
         key = ("-----BEGIN PRIVATE KEY-----\n" + "MIIBVAIBADANBg" * 40
