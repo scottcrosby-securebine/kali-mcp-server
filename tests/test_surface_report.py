@@ -194,6 +194,12 @@ class DnsHygieneTests(unittest.TestCase):
         ok = self._by_check([{"type": "NS", "name": "example.com", "zone_transfer": "success"}])
         self.assertTrue(ok["Zone"]["observed"])
 
+    def test_axfr_type_matched_exactly_not_by_substring(self):
+        # R3 red-team note: `"axfr" in rtype` matched a crafted type "AXFR_FAILED";
+        # exact match rejects it while a real axfr-typed record still flags.
+        self.assertFalse(self._by_check([{"type": "AXFR_FAILED", "name": "x"}])["Zone"]["observed"])
+        self.assertTrue(self._by_check([{"type": "AXFR", "name": "x"}])["Zone"]["observed"])
+
 
 class RenderSurfaceTests(unittest.TestCase):
     @classmethod
@@ -335,6 +341,15 @@ class RenderSurfaceTests(unittest.TestCase):
         self.assertIn("o***@corp.example", html)     # dnsrecon A-record name
         self.assertIn("a***@stale.example", html)    # CNAME takeover target
         self.assertIn("r***@mail.example", html)     # whatweb tech label
+
+    def test_provenance_target_ref_email_masked(self):
+        # R3-F1: a URL scan target carrying userinfo renders in the provenance
+        # table; it must be masked there too, consistent with the inventory cell.
+        html = self._render([_result("nmap", "http://admin@example.com/", [
+            {"id": "p", "Severity": "INFO", "Title": "80/tcp http open",
+             "state": "open", "service": "http"}])])
+        self.assertNotIn("admin@example.com", html)
+        self.assertIn("a***@example.com", html)
 
 
 class SurfaceReportAggregationTests(unittest.TestCase):
