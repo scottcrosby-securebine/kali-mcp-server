@@ -58,6 +58,39 @@ class DirectOutputRedactionTests(unittest.TestCase):
         ("a private key block",
          "-----BEGIN RSA PRIVATE KEY-----\nKEYBODYLEAK\n-----END RSA PRIVATE KEY-----\n",
          "KEYBODYLEAK"),
+        # #74: nikto restates a header value away from its name, past the reach
+        # of the keyword pattern.
+        ("nikto header-contents prose",
+         "+ Uncommon header(s) 'x-api-key' found, with contents: leak_apikey_PLAINTEXTKEY_7f3a9c001122334455.\n",
+         "leak_apikey_PLAINTEXTKEY_7f3a9c001122334455"),
+        # A bare HTTP-Basic credential not preceded by an Authorization keyword
+        # is only caught by the Basic pattern (#74/#78 pair).
+        ("a bare Basic auth credential in prose",
+         "Server offered Basic dXNlcjpzM2NyZXRQQVNTd29yZA== to the client\n",
+         "dXNlcjpzM2NyZXRQQVNTd29yZA=="),
+        # #74 red-team R3: short, all-lowercase, and sentence-final bare Basic
+        # credentials must ALL redact (the broad run + colon guard, not the
+        # base64-shape lookaheads, which leaked these).
+        ("a short bare Basic credential", "auth header Basic dTpw end\n", "dTpw"),
+        ("an all-lowercase bare Basic credential", "tried Basic ajphamdh here\n", "ajphamdh"),
+        ("a sentence-final bare Basic credential", "sent Basic dXNlcjpzM2NyZXQ=.\n", "dXNlcjpzM2NyZXQ="),
+        # #74 red-team R5: nikto value under an X-Auth-Key style header name.
+        ("nikto x-auth-key contents",
+         "+ Uncommon header(s) 'x-auth-key' found, with contents: REAL_SECRET_123abc.\n",
+         "REAL_SECRET_123abc"),
+        # #74 red-team R1: whitespace before the nikto `contents:` colon (a plain
+        # space, or an NBSP folded to one) must not defeat the anchor.
+        ("nikto contents colon with space",
+         "+ Uncommon header(s) 'authorization' found, with contents : SPACECOLONLEAK_998877.\n",
+         "SPACECOLONLEAK_998877"),
+        # #74 red-team R2-2: a real colon-terminated Basic credential (base64-
+        # shaped) must redact even though the "Basic options:" label survives.
+        ("a colon-terminated Basic credential", "proxy log Basic dXNlcjpwYXNz: 401\n", "dXNlcjpwYXNz"),
+        # #74 red-team R3-1: an ALL-LOWERCASE colon-terminated base64 credential
+        # must also redact (the shape guard missed it; the label-exemption does not).
+        ("a lowercase colon-terminated Basic credential", "log Basic ajph: done\n", "ajph"),
+        # #74 red-team R2-4: X-Auth-Key header value in text must redact.
+        ("an X-Auth-Key header value", "X-Auth-Key: LEAKAUTHVALUE987xyz\n", "LEAKAUTHVALUE987xyz"),
     )
 
     # Ordinary output every one of these tools emits. Redaction must leave it
@@ -74,6 +107,10 @@ class DirectOutputRedactionTests(unittest.TestCase):
          "Registrar Abuse Contact Email: abuse@registrar.tld\n", "abuse@registrar.tld"),
         ("an enum4linux share table",
          "\tACME-FS1        Disk      Company Files\n", "ACME-FS1"),
+        # #78: the Basic pattern must not eat the "Basic options:" section label
+        # (a base64-charset word followed by ':' is a label, not a credential).
+        ("a metasploit Basic options header",
+         "Module options (auxiliary/scanner/ssh/ssh_login):\n\nBasic options:\n", "Basic options:"),
     )
 
     def test_removes_secrets_from_direct_output(self):

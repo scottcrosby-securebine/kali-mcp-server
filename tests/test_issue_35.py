@@ -24,9 +24,18 @@ class SourceTypeDiscoverabilityTests(unittest.TestCase):
         self.assertIn(", ".join(sorted(accepted)), response)
 
     def test_trivy_rejection_names_every_accepted_source_type(self):
-        response = self.call(self.server.trivy_scan("alpine:3.10", "image"))
-        self.assertIn("image", response)
+        response = self.call(self.server.trivy_scan("alpine:3.10", "bogus"))
+        self.assertIn("bogus", response)
         self.assert_names_every_value(response, self.server.TRIVY_SOURCE_TYPES)
+
+    def test_trivy_image_aliases_to_registry(self):
+        """#35: 'image' is the intuitive value; it must route to the registry
+        path, not be rejected at validation."""
+        with patch.object(self.server, "_validate_registry_reference",
+                          side_effect=RuntimeError("reached registry path")) as validated:
+            with self.assertRaises(RuntimeError):
+                asyncio.run(self.server.trivy_scan("alpine:3.10", "image"))
+        self.assertTrue(validated.called)
 
     def test_syft_rejection_names_every_accepted_source_type(self):
         response = self.call(self.server.syft_sbom("alpine:3.10", "image"))
