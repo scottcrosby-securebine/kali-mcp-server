@@ -1015,6 +1015,9 @@ class DnsReconCaptureTests(unittest.TestCase):
         "_parse_nikto_json": lambda secret: json.dumps({"vulnerabilities": [{"OSVDB": secret, "msg": secret, "url": secret, "nested": [secret]}]}),
         "_parse_ffuf_json": lambda secret: json.dumps({"results": [{"url": "http://h/?" + secret, "input": secret, "status": 200, "nested": [secret]}]}),
         "_parse_wafw00f_json": lambda secret: json.dumps([{"detected": True, "firewall": secret, "manufacturer": secret, "nested": [secret]}]),
+        "_parse_sqlmap": lambda secret: f"Parameter: {secret} (GET)\n    Type: {secret}\n    Title: {secret}\n    Payload: {secret}\n---\nback-end DBMS: {secret}\n",
+        "_parse_wpscan": lambda secret: json.dumps({"version": {"number": secret, "status": secret, "vulnerabilities": [{"title": secret, "fixed_in": secret, "references": {"cve": [secret], "url": [secret]}}]}, "plugins": {secret: {"vulnerabilities": [{"title": secret, "fixed_in": secret, "references": {"cve": [secret]}}]}}, "users": {secret: {}}}),
+        "_parse_wfuzz": lambda secret: json.dumps([{"code": secret, "chars": secret, "words": secret, "lines": secret, "url": "http://h/" + secret, "description": secret, "payload": secret}]),
         "_parse_testssl_json": lambda secret: json.dumps([{"id": secret, "severity": "HIGH", "finding": secret, "cve": [secret]}]),
         "_parse_sslyze_json": lambda secret: json.dumps({"server_scan_results": [{"scan_result": {f"{secret}_cipher_suites": {"result": {"accepted_cipher_suites": [{"cipher_suite": {"name": secret}}]}}}}]}),
         "_parse_sslscan_xml": lambda secret: f'<document><ssltest><protocol type="ssl" version="{_xml(secret)}" enabled="1"/><cipher status="accepted" sslversion="{_xml(secret)}" bits="{_xml(secret)}" cipher="{_xml(secret)}"/></ssltest></document>',
@@ -1225,7 +1228,6 @@ class RawTextCaptureTests(unittest.TestCase):
 
     # (tool, capture label, call args, the target the id/Title must carry)
     WIRED = [
-        ("whois_lookup", "whois", ("example.com",), "example.com"),
         ("nbtscan_scan", "nbtscan", ("192.168.1.0/24",), "192.168.1.0/24"),
         ("smb_enum", "smbclient", ("10.0.0.5",), "10.0.0.5"),
         ("metasploit_search", "metasploit_search", ("eternalblue",), "eternalblue"),
@@ -1320,11 +1322,39 @@ class RawTextCaptureTests(unittest.TestCase):
                 self.assertEqual(1, len(captured["doc"]["findings"]))
                 self.assertIn(target, captured["doc"]["findings"][0]["Title"])
 
+    # whois left the raw-text family for a structured parser (#89 D3): capture
+    # must still leave the operator text byte-identical and add no argument, but
+    # now persists a structured registration finding with masked emails.
+    def test_whois_capture_is_structured_and_text_unchanged(self):
+        body = ("Domain Name: EXAMPLE.COM\nRegistrar: Example Registrar Inc.\n"
+                "Registrar Abuse Contact Email: abuse@example.com\n")
+        seen = {}
+
+        def fake_exec(cmd, timeout=None, **kwargs):
+            seen.setdefault("argv", []).append(list(cmd))
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=body, stderr="")
+
+        captured = {}
+        with (
+            patch.object(self.server, "execute_command", fake_exec),
+            patch.object(self.server, "_write_scanner_result",
+                         lambda d: captured.setdefault("doc", d) and "Z" * 32),
+        ):
+            text = asyncio.run(self.server.whois_lookup("example.com"))
+        with patch.object(self.server, "execute_command", fake_exec):
+            plain = self.server.run_command(seen["argv"][0])
+        self.assertEqual(plain, text)                              # text byte-unchanged
+        self.assertEqual(["whois", "example.com"], seen["argv"][0])  # no argument added
+        finding = captured["doc"]["findings"][0]
+        self.assertEqual("whois", captured["doc"]["scanner"])
+        self.assertEqual("Example Registrar Inc.", finding["registrar"])
+        self.assertIn("a***@example.com", finding["emails"])       # masked at capture
+        self.assertNotIn("abuse@example.com", json.dumps(captured["doc"]))
+
     # Capture must add NOTHING to argv in out_args=None mode, or the text
     # invariant is a claim rather than a property.
     def test_wired_tools_add_no_argument(self):
         expected = {
-            "whois_lookup": ["whois", "example.com"],
             "nbtscan_scan": ["nbtscan", "192.168.1.0/24"],
             "smb_enum": ["smbclient", "-L", "10.0.0.5", "-N"],
             "metasploit_search": ["msfconsole", "-q", "-x", "search eternalblue; exit"],
