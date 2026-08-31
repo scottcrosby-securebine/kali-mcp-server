@@ -1,0 +1,2 @@
+ghcr.io/scottcrosby-securebine/kali-mcp-server@sha256:f1761313d6e82e8d656178f249447ae1c272a638dd56ed2cae1af57e79cea003
+tag: v2.1.0
