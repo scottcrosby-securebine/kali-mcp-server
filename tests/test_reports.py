@@ -8,6 +8,23 @@ from unittest.mock import AsyncMock, patch
 from server_test_support import load_server
 
 
+def _locked_version(lock_name, package):
+    """The version `docker/<lock_name>` pins for `package`.
+
+    The report renders whatever the lock declares (the server falls back to
+    `docker/*.lock` off-image), so a literal here fails on every legitimate
+    package refresh instead of on a real regression. Reading the pin keeps the
+    assertion about the report DISCLOSING it; the emptiness guard below is what
+    stops that from becoming vacuous.
+    """
+    lock = Path(__file__).resolve().parent.parent / "docker" / lock_name
+    for line in lock.read_text(encoding="utf-8").splitlines():
+        name, _, version = line.partition("=")
+        if name.strip() == package:
+            return version.strip()
+    raise AssertionError(f"{package} is not pinned in docker/{lock_name}")
+
+
 class ReportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -212,8 +229,11 @@ class ReportTests(unittest.TestCase):
                     report = artifacts[0].read_text(encoding="utf-8")
                     self.assertIn(status, report.lower())
                     self.assertIn("nmap_service_scan", report)
-                    self.assertIn("1:9.20.26-1", report)
-                    self.assertIn("2.1.5-1", report)
+                    dns_pin = _locked_version("packages.lock", "bind9-dnsutils")
+                    tls_pin = _locked_version("source-packages.lock", "sslscan")
+                    self.assertTrue(dns_pin and tls_pin, "both locks must carry a version")
+                    self.assertIn(dns_pin, report)      # repo pin reaches the report
+                    self.assertIn(tls_pin, report)      # source-built pin does too
                     if status == "partial":
                         self.assertIn("dns failed", report)
                 else:
