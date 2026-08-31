@@ -126,10 +126,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
-    runs-on: ubuntu-latest
+        # arm64 builds on a native runner. Emulating it on ubuntu-latest cost
+        # 35-65 min because `source-tool-builder` compiles dirb, sslscan and
+        # nbtscan from source under QEMU, and run 33335015163 was killed by the
+        # 60-minute ceiling mid-build, producing NO arm64 test evidence at all.
+        # GitHub's arm64 hosted runners are free for public repositories.
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
