@@ -39,6 +39,31 @@ DNS_JSON = json.dumps([
 ])
 
 
+# Real nmap -oX document structure, DOCTYPE and all, so `_parse_nmap_xml`
+# produces this report's nmap findings instead of the test hand-writing them.
+# `fixtures/scanners/nmap-real-doctype.xml` is the verbatim binary capture that
+# pins the format; this one carries the services the surface assertions need.
+NMAP_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/share/nmap/nmap.xsl" type="text/xsl"?>
+<nmaprun scanner="nmap" args="nmap -sT -Pn -oX - example.com" version="7.99" xmloutputversion="1.05">
+<scaninfo type="connect" protocol="tcp" numservices="3" services="80,443,3306"/>
+<host><status state="up" reason="user-set"/>
+<address addr="93.184.216.34" addrtype="ipv4"/>
+<hostnames><hostname name="example.com" type="user"/></hostnames>
+<ports><port protocol="tcp" portid="80"><state state="open" reason="syn-ack"/>\
+<service name="http" product="nginx" version="1.18" method="probed" conf="10"/></port>
+<port protocol="tcp" portid="443"><state state="closed" reason="conn-refused"/>\
+<service name="https" method="table" conf="3"/></port>
+<port protocol="tcp" portid="3306"><state state="open" reason="syn-ack"/>\
+<service name="mysql" product="MySQL" version="8.0" method="probed" conf="10"/></port>
+</ports>
+</host>
+<runstats><finished time="1788127961" exit="success"/><hosts up="1" down="0" total="1"/></runstats>
+</nmaprun>
+"""
+
+
 def _result(scanner, target, findings):
     return {
         "schema_version": 1, "scanner": scanner, "source_type": "host",
@@ -218,12 +243,7 @@ class RenderSurfaceTests(unittest.TestCase):
         dns_findings = self.server._parse_dnsrecon_json(DNS_JSON)
         whois_findings = self.server._parse_whois(WHOIS_TEXT)
         return self._render([
-            _result("nmap", "example.com", [
-                {"id": "port-80-tcp", "Severity": "INFO", "Title": "80/tcp http open",
-                 "state": "open", "service": "http", "product": "nginx", "version": "1.18"},
-                {"id": "port-3306-tcp", "Severity": "INFO", "Title": "3306/tcp mysql open",
-                 "state": "open", "service": "mysql", "product": "MySQL", "version": "8.0"},
-            ]),
+            _result("nmap", "example.com", self.server._parse_nmap_xml(NMAP_XML)),
             _result("whatweb", "http://example.com",
                     [{"id": "web-tech-nginx", "Severity": "INFO", "Title": "nginx detected",
                       "evidence": "x"}]),
@@ -291,6 +311,20 @@ class RenderSurfaceTests(unittest.TestCase):
         html = self._render([])
         self.assertIn("External attack-surface report", html)
         self.assertIn("No nmap host captures", html)
+
+    def test_real_nmap_capture_reaches_the_inventory(self):
+        # #104: the guard rejected nmap's own `<!DOCTYPE nmaprun>`, so every
+        # captured scan parsed to zero findings and this report rendered the
+        # empty state above against a live host with open ports. Pinned on the
+        # verbatim binary capture, not on a hand-written document.
+        xml = (Path(__file__).parent / "fixtures" / "scanners"
+               / "nmap-real-doctype.xml").read_text(encoding="utf-8")
+        findings = self.server._parse_nmap_xml(xml)
+        self.assertTrue(findings, "real nmap -oX output must parse to a finding")
+        html = self._render([_result("nmap", "127.0.0.1", findings)])
+        self.assertIn("8080", html)
+        self.assertIn("http-proxy", html)
+        self.assertNotIn("No nmap host captures", html)
 
     def test_dns_recon_only_subdomain_appears_in_table(self):
         # Spec P1: a host name only dnsrecon discovered (no subfinder/amass row)
