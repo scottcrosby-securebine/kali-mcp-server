@@ -155,12 +155,15 @@ class RawTranscriptDedupeTests(unittest.TestCase):
         return combined(self.server, [result(self.server, parser(body), scanner) for body in bodies])
 
     def test_repeat_runs_collapse_despite_a_drifting_transcript(self):
-        # whois stamps its own "Last update of whois database" line, so six
-        # otherwise-identical lookups rendered six near-identical 8KB cards.
-        bodies = [f"✅ Scan completed successfully:\n\nDomain: example.com\n"
-                  f">>> Last update of whois database: 2026-08-27T10:0{n}:00Z <<<\n"
+        # A raw-transcript scanner's card drifts only by run_command's own
+        # per-run "(truncated N additional lines)" counter, so six otherwise-
+        # identical runs rendered six near-identical 8KB cards. (whois left this
+        # family for a structured parser in #89; fierce still exercises the
+        # drifting-transcript carve-out.)
+        bodies = [f"✅ Scan completed successfully:\n\nZone: example.com\n\n"
+                  f"... (truncated {n} additional lines)"
                   for n in range(6)]
-        self.assertEqual(1, self.runs("whois", bodies).count("<article>"))
+        self.assertEqual(1, self.runs("fierce", bodies).count("<article>"))
 
     def test_repeat_failures_with_different_exit_codes_collapse(self):
         bodies = [f"❌ Scan failed (exit code {n}):\n\ndo_connect: timeout\n" for n in range(1, 7)]

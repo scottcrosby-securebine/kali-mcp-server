@@ -1228,7 +1228,6 @@ class RawTextCaptureTests(unittest.TestCase):
 
     # (tool, capture label, call args, the target the id/Title must carry)
     WIRED = [
-        ("whois_lookup", "whois", ("example.com",), "example.com"),
         ("nbtscan_scan", "nbtscan", ("192.168.1.0/24",), "192.168.1.0/24"),
         ("smb_enum", "smbclient", ("10.0.0.5",), "10.0.0.5"),
         ("metasploit_search", "metasploit_search", ("eternalblue",), "eternalblue"),
@@ -1323,11 +1322,39 @@ class RawTextCaptureTests(unittest.TestCase):
                 self.assertEqual(1, len(captured["doc"]["findings"]))
                 self.assertIn(target, captured["doc"]["findings"][0]["Title"])
 
+    # whois left the raw-text family for a structured parser (#89 D3): capture
+    # must still leave the operator text byte-identical and add no argument, but
+    # now persists a structured registration finding with masked emails.
+    def test_whois_capture_is_structured_and_text_unchanged(self):
+        body = ("Domain Name: EXAMPLE.COM\nRegistrar: Example Registrar Inc.\n"
+                "Registrar Abuse Contact Email: abuse@example.com\n")
+        seen = {}
+
+        def fake_exec(cmd, timeout=None, **kwargs):
+            seen.setdefault("argv", []).append(list(cmd))
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=body, stderr="")
+
+        captured = {}
+        with (
+            patch.object(self.server, "execute_command", fake_exec),
+            patch.object(self.server, "_write_scanner_result",
+                         lambda d: captured.setdefault("doc", d) and "Z" * 32),
+        ):
+            text = asyncio.run(self.server.whois_lookup("example.com"))
+        with patch.object(self.server, "execute_command", fake_exec):
+            plain = self.server.run_command(seen["argv"][0])
+        self.assertEqual(plain, text)                              # text byte-unchanged
+        self.assertEqual(["whois", "example.com"], seen["argv"][0])  # no argument added
+        finding = captured["doc"]["findings"][0]
+        self.assertEqual("whois", captured["doc"]["scanner"])
+        self.assertEqual("Example Registrar Inc.", finding["registrar"])
+        self.assertIn("a***@example.com", finding["emails"])       # masked at capture
+        self.assertNotIn("abuse@example.com", json.dumps(captured["doc"]))
+
     # Capture must add NOTHING to argv in out_args=None mode, or the text
     # invariant is a claim rather than a property.
     def test_wired_tools_add_no_argument(self):
         expected = {
-            "whois_lookup": ["whois", "example.com"],
             "nbtscan_scan": ["nbtscan", "192.168.1.0/24"],
             "smb_enum": ["smbclient", "-L", "10.0.0.5", "-N"],
             "metasploit_search": ["msfconsole", "-q", "-x", "search eternalblue; exit"],
