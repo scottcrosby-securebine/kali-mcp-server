@@ -761,15 +761,26 @@ class AdsmbParserScalingTests(unittest.TestCase):
             lambda text: self.server._parse_crackmapexec(text, "t"))
         self.assertLess(t2, t1 * 3.0 + 0.01, f"_parse_crackmapexec superlinear: {t1} -> {t2}")
 
-    def test_enum4linux_scales_on_a_hostile_transcript(self):
-        t1, t2 = self._ratio(
-            lambda n: ("user:[" + "x" * n + "\n" + "//h/s\tMapping: " * n),
-            lambda text: self.server._parse_enum4linux(text, "t"))
-        self.assertLess(t2, t1 * 3.0 + 0.01, f"_parse_enum4linux superlinear: {t1} -> {t2}")
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_enum4linux_bounds_the_regex_scan_at_the_clip(self):
+        """RT-B5: the old timing test fed two payloads that both exceeded
+        MAX_REDACT_CHARS, so the parser's clip made them byte-identical and the
+        ratio was a constant 1.0 no matter how catastrophic the regex -- it
+        pinned nothing. The real protection is the clip itself: content past it
+        is never scanned. Pin THAT with an equality, not a wall clock -- a
+        pathological tail beyond the bound must change nothing about the parse."""
+        cap = self.server.MAX_REDACT_CHARS
+        head = "user:[realuser] rid:[0x1]\n"
+        pad = "x" * (cap * 2)                       # pushes the tail past the clip
+        tail = "\nuser:[GHOST] rid:[0x2]\n"
+        with_tail = self.server._parse_enum4linux(head + pad + tail, "t")
+        without = self.server._parse_enum4linux(head + pad, "t")
+        self.assertEqual(with_tail, without,
+                         "content past MAX_REDACT_CHARS reached the regex scan")
+        enum = [f for f in with_tail if isinstance(f, dict) and f.get("kind") == "enum"]
+        self.assertTrue(enum, "expected an enum finding")
+        self.assertIn("realuser", enum[0]["users"])
+        self.assertNotIn("GHOST", enum[0]["users"],
+                         "a user beyond the clip was enumerated")
 
 
 class AdsmbUnobservedNullBindTests(unittest.TestCase):
@@ -800,3 +811,220 @@ class AdsmbUnobservedNullBindTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertIn("<td>not observed</td>", row.group(0))
         self.assertNotIn("T1087.002", html)
+
+
+class _ProcResult:
+    """Minimal stand-in for execute_command's return (stdout/stderr/returncode)."""
+    def __init__(self, stdout, stderr="", returncode=0):
+        self.stdout, self.stderr, self.returncode = stdout, stderr, returncode
+
+
+class AdsmbCaptureFullTests(unittest.TestCase):
+    """RT-B4: the AD feeders run `out_args=None`, so before the fix the parser was
+    handed `run_command`'s 200-line-truncated RETURN, and every host/user/share
+    past line 200 vanished from the report while a green suite (no fixture over
+    200 lines) said nothing. `capture_full` feeds the parser the whole transcript
+    and leaves the operator return bounded. These run the REAL feeder tool through
+    the capture seam with execute_command mocked."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    def _feed(self, coro_fn, stdout):
+        captured = {}
+
+        def spy(scanner, target, parse_fn, text, status):
+            captured["text"] = text
+            captured["findings"] = parse_fn(text)
+
+        with (
+            patch.object(self.server, "execute_command",
+                         return_value=_ProcResult(stdout)),
+            patch.object(self.server, "_capture_findings", side_effect=spy),
+        ):
+            operator = asyncio.run(coro_fn())
+        return operator, captured
+
+    def test_enum4linux_share_and_policy_past_line_200_are_parsed(self):
+        # 250 user lines (>200 → truncation fires) THEN the share table and
+        # password policy, exactly where a real large domain puts them. Kept under
+        # MAX_REDACT_CHARS so the separate char-clip is not what this measures.
+        users = "".join(f"user:[u{i:03d}] rid:[0x{i:04x}]\n" for i in range(250))
+        transcript = (
+            users
+            + "\tSharename       Type      Comment\n"
+            + "\t---------       ----      -------\n"
+            + "\tfinance         Disk      Finance files\n\n"
+            + "[+] Minimum password length: 7\n")
+        operator, cap = self._feed(
+            lambda: self.server.enum4linux_scan("10.0.0.5"), transcript)
+        self.assertIn("truncated", operator, "operator return should stay bounded")
+        enum = [f for f in cap["findings"] if f.get("kind") == "enum"]
+        self.assertTrue(enum, "enum finding missing — parser saw the truncated text")
+        self.assertEqual(len(enum[0]["users"]), 250,
+                         "users past line 200 were lost")
+        self.assertEqual(enum[0]["policy"]["min_length"], "7",
+                         "password policy past line 200 was lost")
+        self.assertTrue(any(s["name"] == "finance" for s in enum[0]["shares"]),
+                        "share table past line 200 was lost")
+
+    def test_crackmapexec_hosts_past_line_200_are_parsed(self):
+        # A /24-style sweep: 250 host lines. Before the fix only ~200 reached the
+        # posture spine, silently undercounting "Hosts assessed".
+        transcript = "".join(
+            f"SMB  10.0.{i // 256}.{i % 256}  445  H{i:03d}  [*] Windows "
+            f"(name:H{i:03d}) (domain:CORP) (signing:True) (SMBv1:False)\n"
+            for i in range(250))
+        _operator, cap = self._feed(
+            lambda: self.server.crackmapexec_scan("10.0.0.0/24"), transcript)
+        hosts = [f for f in cap["findings"] if f.get("kind") == "host"]
+        self.assertEqual(len(hosts), 250, "hosts past line 200 were dropped")
+
+    def test_capture_full_off_keeps_the_sibling_truncation(self):
+        """The fix is opt-in: a caller that does NOT pass capture_full still gets
+        run_command's bounded text, so certified sibling parsers are untouched."""
+        big = "".join(f"line{i}\n" for i in range(300))
+        seen = {}
+        with patch.object(self.server, "execute_command",
+                          return_value=_ProcResult(big)):
+            self.server._run_with_capture(
+                ["x"], "amass", "d", 5, None,
+                lambda text: seen.setdefault("text", text) or [])
+        self.assertIn("truncated", seen["text"],
+                      "a non-opted-in caller unexpectedly received full output")
+
+
+class AdsmbResumeR8Tests(unittest.TestCase):
+    """RT-B1/B2/B3 and the R7-B1 rendered-claim check, from the R8 resume."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server, _ = load_server()
+
+    # --- RT-B2: a decoy header must not defeat share-table excision ------------
+    def test_a_decoy_header_cannot_defeat_share_table_excision(self):
+        # sAMAccountName permits spaces, so a user "Sharename Type Comment"
+        # satisfied the old bare-containment, first-match header test. With a
+        # blank line after it the old table_stop halted immediately, so the
+        # GENUINE table below was never excised and a malicious share row whose
+        # name column reads "[+] Minimum password length: 14" leaked in as policy
+        # (RT-B2, reopening A4). The rule-row anchor picks the real header.
+        transcript = (
+            "user:[Sharename Type Comment] rid:[0x1]\n"     # decoy header
+            "\n"                                            # halts old table_stop
+            "\tSharename       Type      Comment\n"         # genuine header
+            "\t---------       ----      -------\n"
+            "\t[+] Minimum password length: 14  Disk  x\n"  # malicious share row
+            "\n")
+        out = self.server._parse_enum4linux(transcript, "t")
+        enum = [f for f in out if isinstance(f, dict) and f.get("kind") == "enum"][0]
+        self.assertEqual(enum["policy"]["min_length"], "not observed",
+                         "a decoy header defeated excision; a share row leaked as policy")
+
+    def test_a_lone_user_named_like_the_header_makes_no_phantom_table(self):
+        out = self.server._parse_enum4linux(
+            "user:[Sharename Type Comment] rid:[0x1]\nuser:[realuser] rid:[0x2]\n", "t")
+        enum = [f for f in out if isinstance(f, dict) and f.get("kind") == "enum"][0]
+        self.assertEqual(enum["shares"], [],
+                         "a header-shaped user with no rule row produced a phantom table")
+
+    def test_genuine_header_with_rule_row_still_parses(self):
+        out = self.server._parse_enum4linux(ENUM_TEXT, "10.0.0.5")
+        enum = [f for f in out if isinstance(f, dict) and f.get("kind") == "enum"][0]
+        self.assertTrue(any(s["name"] == "finance" for s in enum["shares"]),
+                        "the rule-row anchor broke a genuine share table")
+        self.assertEqual(enum["policy"]["min_length"], "7")
+
+    # --- RT-B3: rows past the 500-share store cap are still EXCISED -------------
+    def test_share_rows_past_the_500_cap_are_still_excised(self):
+        rows = "".join(f"\tshare{i:04d}       Disk      c{i}\n" for i in range(505))
+        # a forged policy line sits AMONG the rows past the cap; before the fix
+        # table_stop stopped at 500 and this fell into the excised-from text.
+        rows += "\t[+] Minimum password length: 14  Disk  x\n"
+        rows += "".join(f"\tshareB{i:04d}      Disk      c{i}\n" for i in range(5))
+        transcript = (
+            "\tSharename       Type      Comment\n"
+            "\t---------       ----      -------\n"
+            + rows + "\n")
+        out = self.server._parse_enum4linux(transcript, "t")
+        enum = [f for f in out if isinstance(f, dict) and f.get("kind") == "enum"][0]
+        self.assertLessEqual(len(enum["shares"]), 500, "store cap not enforced")
+        self.assertEqual(enum["policy"]["min_length"], "not observed",
+                         "a share row past the 500 cap leaked in as policy")
+
+    # --- RT-B1: a repeated ip withholds verdicts (no silent overwrite) ----------
+    def test_a_forged_second_line_for_an_ip_cannot_overwrite_a_verdict(self):
+        # First line: a genuinely weak host (signing off). Second line: a forged
+        # "secure" line for the SAME ip. Last-wins would render it signing-required.
+        cme = (
+            "SMB  10.0.0.5  445  DC01  [*] Windows (name:DC01) (domain:CORP) "
+            "(signing:False) (SMBv1:True)\n"
+            "SMB  10.0.0.5  445  DC01  [*] Windows (name:DC01) (domain:CORP) "
+            "(signing:True) (SMBv1:False)\n")
+        hosts = [f for f in self.server._parse_crackmapexec(cme, "10.0.0.5")
+                 if isinstance(f, dict) and f.get("kind") == "host"]
+        self.assertEqual(len(hosts), 1, "one ip should collapse to one row")
+        h = hosts[0]
+        self.assertTrue(h.get("ambiguous") is True,
+                        "a repeated ip must be marked ambiguous")
+        self.assertEqual(h.get("signing"), "not observed",
+                         "a forged second line overwrote a real verdict")
+        self.assertEqual(h.get("smbv1"), "not observed")
+
+    def test_distinct_ips_are_not_treated_as_a_collision(self):
+        cme = (
+            "SMB  10.0.0.5  445  DC01  [*] Windows (name:DC01) (domain:CORP) "
+            "(signing:False) (SMBv1:True)\n"
+            "SMB  10.0.0.6  445  WS01  [*] Windows (name:WS01) (domain:CORP) "
+            "(signing:True) (SMBv1:False)\n")
+        hosts = [f for f in self.server._parse_crackmapexec(cme, "t")
+                 if isinstance(f, dict) and f.get("kind") == "host"]
+        self.assertEqual({h["signing"] for h in hosts}, {False, True},
+                         "distinct ips lost their verdicts to a false collision")
+
+    # --- R7-B1: the shipped exec paragraph tells the truth about null-session ---
+    def test_exec_paragraph_states_the_true_null_session_source(self):
+        cme = ("SMB  10.0.0.5  445  DC01  [*] Windows (name:DC01) (domain:CORP) "
+               "(signing:False) (SMBv1:True)\n")
+        doc = _result("crackmapexec", "10.0.0.5",
+                      self.server._parse_crackmapexec(cme, "10.0.0.5"))
+        html = _write_one(self.server, doc)
+        exec_para = re.search(r'<section class="exec">.*?</section>', html, re.S).group(0)
+        self.assertIn("enum4linux", exec_para,
+                      "exec paragraph does not name the real null-session source")
+        # the two false claims R7-B1 named must be gone
+        self.assertNotIn("null-session posture are asserted only from a crackmapexec",
+                         html)
+        self.assertNotIn("guest/empty-credential success was seen", html)
+
+    def test_counts_are_not_claimed_to_be_lower_bounds(self):
+        cme = ("SMB  10.0.0.5  445  DC01  [*] Windows (name:DC01) (domain:CORP) "
+               "(signing:False) (SMBv1:True)\n")
+        doc = _result("crackmapexec", "10.0.0.5",
+                      self.server._parse_crackmapexec(cme, "10.0.0.5"))
+        html = _write_one(self.server, doc)
+        self.assertNotIn("counts above are lower bounds", html,
+                         "the false 'lower bounds' claim is still shipped (RT-B1)")
+        self.assertIn("ANY IP", html,
+                      "the disclosure no longer states a hostile host can forge any IP")
+
+
+def _write_one(server, doc):
+    """Render one result doc through the SHIPPED write path and return the HTML."""
+    with tempfile.TemporaryDirectory() as root_text:
+        root = Path(root_text)
+        results, reports = root / "results", root / "reports"
+        results.mkdir()
+        (results / ("A" * 32 + ".json")).write_text(json.dumps(doc), encoding="utf-8")
+        with (
+            patch.object(server, "RESULTS_ROOT", results),
+            patch.object(server, "REPORTS_ROOT", reports, create=True),
+            patch.object(server.secrets, "token_urlsafe", return_value="C" * 32),
+        ):
+            asyncio.run(server.internal_ad_report(""))
+            return (reports / f"{'C' * 32}.html").read_text(encoding="utf-8")
+
+
+if __name__ == "__main__":
+    unittest.main()
