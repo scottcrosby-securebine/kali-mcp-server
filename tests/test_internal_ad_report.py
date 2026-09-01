@@ -609,7 +609,13 @@ class AdsmbTristateRenderTests(unittest.TestCase):
         This is a LINT, not a proof. It covers `.get("x")`, `.get('x')` and
         `["x"]`/`['x']` spellings in this module; it cannot see an indirect key
         (`k = "smbv1"; h.get(k)`) or a consumer outside this file (red-team N9).
-        It catches the regression that actually happened, cheaply, every run."""
+        It catches the regression that actually happened, cheaply, every run.
+
+        Allowed idioms: `is True` / `is False`, `_adsmb_flag(...)`, and an
+        explicit `==`/`!=` comparison. Equality is a value comparison, not a
+        truthiness read -- the cross-doc conflict check (RT-B1-XDOC) compares two
+        posture tuples, which is safe; the bug this catches is IMPLICIT
+        truthiness (`if h.get("signing")`), which never carries `==`/`!=`."""
         source = Path(self.server.__file__).read_text(encoding="utf-8")
         field = r"""(?:\.get\(|\[)['"](signing|smbv1|null_bind)['"]"""
         offenders = [
@@ -619,7 +625,7 @@ class AdsmbTristateRenderTests(unittest.TestCase):
             and re.search(field, line)
             # a WRITE (`hosts[ip]["null_bind"] = True`) is not a truthiness read
             and not re.search(r"""\[['"](signing|smbv1|null_bind)['"]\]\s*=[^=]""", line)
-            and not re.search(r"\bis (True|False)\b|_adsmb_flag\(", line)
+            and not re.search(r"\bis (True|False)\b|_adsmb_flag\(|==|!=", line)
         ]
         self.assertEqual([], offenders, f"truthiness read of a tri-state field: {offenders}")
 
@@ -731,7 +737,8 @@ class AdsmbWritePathTests(unittest.TestCase):
         self.assertIn(
             '<span class="label meta">Null session</span><span class="num">1</span>', html)
         self.assertIn("T1087.002", html)                      # ATT&CK reachable
-        self.assertIn("Disable null/guest sessions on", html)  # remediation reachable
+        self.assertIn("Disable anonymous (null) sessions on", html)  # remediation reachable
+        self.assertNotIn("null/guest sessions", html)  # only anonymous binds are observed (R7-B1-REMED)
 
 
 class AdsmbParserScalingTests(unittest.TestCase):
@@ -768,19 +775,19 @@ class AdsmbParserScalingTests(unittest.TestCase):
         pinned nothing. The real protection is the clip itself: content past it
         is never scanned. Pin THAT with an equality, not a wall clock -- a
         pathological tail beyond the bound must change nothing about the parse."""
-        cap = self.server.MAX_REDACT_CHARS
+        cap = self.server.MAX_ADSMB_TRANSCRIPT
         head = "user:[realuser] rid:[0x1]\n"
-        pad = "x" * (cap * 2)                       # pushes the tail past the clip
+        pad = "x" * (cap * 2)                       # pushes the tail past the bound
         tail = "\nuser:[GHOST] rid:[0x2]\n"
         with_tail = self.server._parse_enum4linux(head + pad + tail, "t")
         without = self.server._parse_enum4linux(head + pad, "t")
         self.assertEqual(with_tail, without,
-                         "content past MAX_REDACT_CHARS reached the regex scan")
+                         "content past MAX_ADSMB_TRANSCRIPT reached the regex scan")
         enum = [f for f in with_tail if isinstance(f, dict) and f.get("kind") == "enum"]
         self.assertTrue(enum, "expected an enum finding")
         self.assertIn("realuser", enum[0]["users"])
         self.assertNotIn("GHOST", enum[0]["users"],
-                         "a user beyond the clip was enumerated")
+                         "a user beyond the transcript bound was enumerated")
 
 
 class AdsmbUnobservedNullBindTests(unittest.TestCase):
@@ -894,6 +901,40 @@ class AdsmbCaptureFullTests(unittest.TestCase):
         self.assertIn("truncated", seen["text"],
                       "a non-opted-in caller unexpectedly received full output")
 
+    def test_a_huge_transcript_is_bounded_not_unbounded(self):
+        """RT-B4-UNBOUNDED: capture_full removed the 200-line bound that used to
+        cap parser cost; MAX_ADSMB_TRANSCRIPT is the replacement. 20k host lines
+        (~1.8 MiB) must NOT yield 20k findings/an unbounded artifact."""
+        transcript = "".join(
+            f"SMB  10.{i // 65536}.{(i // 256) % 256}.{i % 256}  445  H{i}  [*] Win "
+            f"(name:H{i}) (domain:C) (signing:True) (SMBv1:False)\n"
+            for i in range(20000))
+        self.assertGreater(len(transcript), self.server.MAX_ADSMB_TRANSCRIPT)
+        hosts = [f for f in self.server._parse_crackmapexec(transcript, "t")
+                 if isinstance(f, dict) and f.get("kind") == "host"]
+        self.assertLess(len(hosts), 20000,
+                        "the transcript bound did not cap an oversized parse")
+
+    def test_char_cap_does_not_drop_a_real_domains_users_or_maps(self):
+        """RT-B4-CHARCAP: capture_full fixed the 200-LINE cut, but the enum scans
+        still clipped `flat` at MAX_REDACT_CHARS=8192 CHARS. A 500-user dump is
+        ~13 KB, so ~322 users and the share mappings after them were dropped —
+        parsed directly here (not through the seam) to isolate the char bound."""
+        users = "".join(f"user:[u{i:03d}] rid:[0x{i:04x}]\n" for i in range(500))
+        transcript = (
+            users
+            + "\tSharename       Type      Comment\n"
+            + "\t---------       ----      -------\n"
+            + "\tfinance         Disk      files\n\n"
+            + "//10.0.0.5/finance\tMapping: OK\n")
+        enum = [f for f in self.server._parse_enum4linux(transcript, "10.0.0.5")
+                if f.get("kind") == "enum"][0]
+        self.assertEqual(len(enum["users"]), 500,
+                         "users past the old 8192-char clip were dropped")
+        fin = [s for s in enum["shares"] if s["name"] == "finance"][0]
+        self.assertEqual(fin["map"], "OK",
+                         "a share mapping past the old 8192-char clip was dropped")
+
 
 class AdsmbResumeR8Tests(unittest.TestCase):
     """RT-B1/B2/B3 and the R7-B1 rendered-claim check, from the R8 resume."""
@@ -938,10 +979,14 @@ class AdsmbResumeR8Tests(unittest.TestCase):
 
     # --- RT-B3: rows past the 500-share store cap are still EXCISED -------------
     def test_share_rows_past_the_500_cap_are_still_excised(self):
+        # A `user:[...]` row sits among the table rows PAST the 500 store cap.
+        # Before the fix, table_stop halted at the cap, so this row fell into the
+        # excised-from text and `_ENUM_USER_RE` enumerated LEAK; after the fix
+        # table_stop advances over the whole table so the row is excised. (An
+        # earlier version of this test used a forged `[+] policy` row, which the
+        # end-anchored policy regex can never match — it pinned nothing: R8-TEST-B3.)
         rows = "".join(f"\tshare{i:04d}       Disk      c{i}\n" for i in range(505))
-        # a forged policy line sits AMONG the rows past the cap; before the fix
-        # table_stop stopped at 500 and this fell into the excised-from text.
-        rows += "\t[+] Minimum password length: 14  Disk  x\n"
+        rows += "\tuser:[LEAK] rid:[0x9]  Disk  x\n"
         rows += "".join(f"\tshareB{i:04d}      Disk      c{i}\n" for i in range(5))
         transcript = (
             "\tSharename       Type      Comment\n"
@@ -950,8 +995,8 @@ class AdsmbResumeR8Tests(unittest.TestCase):
         out = self.server._parse_enum4linux(transcript, "t")
         enum = [f for f in out if isinstance(f, dict) and f.get("kind") == "enum"][0]
         self.assertLessEqual(len(enum["shares"]), 500, "store cap not enforced")
-        self.assertEqual(enum["policy"]["min_length"], "not observed",
-                         "a share row past the 500 cap leaked in as policy")
+        self.assertNotIn("LEAK", enum["users"],
+                         "a table row past the 500 cap leaked in as an enumerated user")
 
     # --- RT-B1: a repeated ip withholds verdicts (no silent overwrite) ----------
     def test_a_forged_second_line_for_an_ip_cannot_overwrite_a_verdict(self):
@@ -1006,17 +1051,51 @@ class AdsmbResumeR8Tests(unittest.TestCase):
         html = _write_one(self.server, doc)
         self.assertNotIn("counts above are lower bounds", html,
                          "the false 'lower bounds' claim is still shipped (RT-B1)")
+        # Pin the exact honest phrasing, so a mutation to "upper bounds" or
+        # "lower bounds" also fails, not only the one forbidden string
+        # (R8-TEST-DISCLOSURE).
+        self.assertIn("neither upper nor lower bounds", html,
+                      "the disclosure no longer states the counts are neither bound")
         self.assertIn("ANY IP", html,
                       "the disclosure no longer states a hostile host can forge any IP")
+
+    # --- RT-B1-XDOC: a forged row in one scan doc cannot overwrite another -----
+    def test_a_forged_row_in_one_doc_cannot_overwrite_a_genuine_row_in_another(self):
+        real = self.server._parse_crackmapexec(
+            "SMB  10.0.0.5  445  DC01  [*] Win (name:DC01) (domain:C) "
+            "(signing:False) (SMBv1:True)\n", "10.0.0.5")
+        forged = self.server._parse_crackmapexec(
+            "SMB  10.0.0.5  445  DC01  [*] Win (name:DC01) (domain:C) "
+            "(signing:True) (SMBv1:False)\n", "10.0.0.9")
+        # Both orders: the cross-doc conflict for ip 10.0.0.5 must withhold, so a
+        # forged scan doc can neither assert 'required' nor blank a real verdict.
+        for a, b in ((real, forged), (forged, real)):
+            html = _write_docs(self.server,
+                               [_result("crackmapexec", "t1", a),
+                                _result("crackmapexec", "t2", b)])
+            self.assertIn("line ambiguous", html,
+                          "cross-doc conflict for one ip was not withheld (RT-B1-XDOC)")
+            row = re.search(r'<tr><th scope="row">DC01</th>.*?</tr>', html, re.S).group(0)
+            self.assertIn("<td>not observed</td>", row,
+                          "a forged scan doc's verdict survived cross-doc aggregation")
+            self.assertNotIn("<td>required</td>", row)
+            self.assertNotIn("<td>not required</td>", row)
 
 
 def _write_one(server, doc):
     """Render one result doc through the SHIPPED write path and return the HTML."""
+    return _write_docs(server, [doc])
+
+
+def _write_docs(server, docs):
+    """Render several result docs through the SHIPPED write path; return the HTML."""
     with tempfile.TemporaryDirectory() as root_text:
         root = Path(root_text)
         results, reports = root / "results", root / "reports"
         results.mkdir()
-        (results / ("A" * 32 + ".json")).write_text(json.dumps(doc), encoding="utf-8")
+        for letter, doc in zip("ABDEFGHIJK", docs):
+            (results / (letter * 32 + ".json")).write_text(
+                json.dumps(doc), encoding="utf-8")
         with (
             patch.object(server, "RESULTS_ROOT", results),
             patch.object(server, "REPORTS_ROOT", reports, create=True),

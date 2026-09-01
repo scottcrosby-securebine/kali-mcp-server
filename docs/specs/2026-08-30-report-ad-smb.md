@@ -62,15 +62,24 @@ chokepoint), same trap the Metasploit card solved.
     invocation becomes `-U -S -G -P` so the password-policy summary has real data.
     `-P` is one extra RPC, not the `-a` sweep the existing comment dropped for
     timeout; TIMEOUT_EXTRA_LONG unchanged. Update the scope comment.
+    Both AD feeders pass `capture_full=True`, so the parser sees the WHOLE
+    transcript, not `run_command`'s 200-line operator return: enum4linux prints
+    one line per user, so on a real domain the share table and policy fall past
+    line 200, and a subnet sweep's crackmapexec hosts past 200 would be dropped
+    (RT-B4). The transcript is bounded by `MAX_ADSMB_TRANSCRIPT` (256 KiB) for
+    parse/persist cost, replacing the too-small 8192-char redaction clip the
+    enum scans used.
   - **nbtscan / smbclient stay raw-transcript feeders** (already captured). NetBIOS
     names/roles surfaced from the nbtscan transcript, corroboration only.
   - **responder unchanged** — static advisory, runs nothing; source of the
     observation-limited poisoning section, not a parser.
 
 ## Honesty rules (non-negotiable, mirror #90 caveats + P3b posture)
-- **Host posture is observed-only.** signing/SMBv1/null-bind asserted only
-  from an observed crackmapexec line; a host with no CME observation is absent
-  from the posture table, never rendered "secure".
+- **Host posture is observed-only.** signing/SMBv1 asserted only from an
+  observed crackmapexec line; a host with no CME observation is absent from the
+  posture table, never rendered "secure". null-bind is a SEPARATE source —
+  enum4linux's session check, "observed" only for an EMPTY-username (anonymous)
+  bind (see the null-bind rule below), never crackmapexec.
 - **The channel is partly target-controlled, and the report says so** (Scott,
   2026-08-31, ruling O1). crackmapexec writes the target's own negotiate
   response into the host line unsanitized (`smb.py`: `server_os =
@@ -86,10 +95,12 @@ chokepoint), same trap the Metasploit card solved.
     FS/GS/RS, NEL, U+2028/9) acts as one.
   - A verdict is emitted ONLY for a line whose structure is unambiguous.
   - The rendered report BADGES the posture verdicts as parsed from tool text,
-    states that a host can influence its own row, presents the counts as lower
-    bounds, and tells the reader to treat a single row as a lead to confirm.
-    ATT&CK entries say the same. The verdicts are not presented as clean
-    observations.
+    states that a hostile host can author a row for ANY IP (its own or
+    another's), presents the counts as NEITHER upper nor lower bounds (a forged
+    row can add or overwrite a host), withholds verdicts for an ip seen on more
+    than one host line in this scan OR with conflicting posture across scans, and
+    tells the reader to treat a single row as a lead to confirm. ATT&CK entries
+    say the same. The verdicts are not presented as clean observations.
   - The permanent fix is a feeder with real structured output (netexec /
     enum4linux-ng emit JSON). Recorded as the follow-on; out of this phase.
 - **An AMBIGUOUS host line asserts NOTHING, and says so in the report.** A line
@@ -184,7 +195,7 @@ already in RAW_TRANSCRIPT_SCANNERS). responder is advisory-only, not a feeder.
 New `_ADSMB_TEMPLATE` (SMB Perimeter IA), reusing escaped/rows/list_items/chart
 + existing tokens/CSS/badges. Sections:
 1. **Posture summary tiles** — hosts assessed, SMBv1-on count, signing-off count,
-   null-bind count, shares flagged.
+   null-bind count, verdicts withheld (ambiguous lines), shares flagged.
 2. **Per-host SMB posture** table — host · IP · OS · domain · signing · SMBv1 ·
    null-bind (crackmapexec spine).
 3. **Share inventory** — host · share · type · comment · map (OK/DENIED) ·
