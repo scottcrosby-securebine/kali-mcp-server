@@ -61,7 +61,7 @@ class LeadingDashGuardTests(unittest.TestCase):
         # rejection explicit rather than incidental. Patch exists True so the
         # guard, not the existence check, is what fires.
         with patch.object(self.server.os.path, "exists", return_value=True):
-            for tool in ("john_crack", "hashcat_crack"):
+            for tool in ("john_crack",):
                 with self.subTest(tool=tool):
                     out, spawned = self.call(tool, "-config=/evil")
                     self.assertIn("must not begin with '-'", out)

@@ -1,6 +1,6 @@
 # Kali MCP Server
 
-An MCP stdio server that preserves 42 Kali security calls and adds eight bounded scanning and local-reporting calls. The supported runtime is the repository's Docker image launched through `scripts/kali-mcp` on Linux amd64/arm64 or Apple Silicon.
+An MCP stdio server that preserves 41 Kali security calls and adds eight bounded scanning and local-reporting calls. The supported runtime is the repository's Docker image launched through `scripts/kali-mcp` on Linux amd64/arm64 or Apple Silicon.
 
 Use this software only on systems and data you own or are explicitly authorized to assess.
 
@@ -27,9 +27,9 @@ Nmap wrappers force unprivileged TCP connect scanning (`--unprivileged -sT -Pn`)
 
 ## Catalog
 
-The 42 preserved calls are:
+The 41 preserved calls are:
 
-`nmap_scan`, `nmap_service_scan`, `nmap_vuln_scan`, `nmap_comprehensive_scan`, `nmap_port_scan`, `nmap_script_scan`, `dns_enum`, `dns_recon`, `subfinder_scan`, `amass_enum`, `fierce_scan`, `nikto_scan`, `wpscan_scan`, `dirb_scan`, `ffuf_scan`, `gobuster_scan`, `wfuzz_scan`, `sqlmap_scan`, `whatweb_scan`, `wafw00f_scan`, `nuclei_scan`, `web_headers`, `sslscan_scan`, `testssl_scan`, `sslyze_scan`, `enum4linux_scan`, `nbtscan_scan`, `crackmapexec_scan`, `responder_analyze`, `smb_enum`, `hydra_attack`, `john_crack`, `hashcat_crack`, `searchsploit_search`, `metasploit_search`, `metasploit_info`, `theharvester_scan`, `whois_lookup`, `quick_recon`, `full_recon`, `web_audit`, and `network_sweep`.
+`nmap_scan`, `nmap_service_scan`, `nmap_vuln_scan`, `nmap_comprehensive_scan`, `nmap_port_scan`, `nmap_script_scan`, `dns_enum`, `dns_recon`, `subfinder_scan`, `amass_enum`, `fierce_scan`, `nikto_scan`, `wpscan_scan`, `dirb_scan`, `ffuf_scan`, `gobuster_scan`, `wfuzz_scan`, `sqlmap_scan`, `whatweb_scan`, `wafw00f_scan`, `nuclei_scan`, `web_headers`, `sslscan_scan`, `testssl_scan`, `sslyze_scan`, `enum4linux_scan`, `nbtscan_scan`, `crackmapexec_scan`, `responder_analyze`, `smb_enum`, `hydra_attack`, `john_crack`, `searchsploit_search`, `metasploit_search`, `metasploit_info`, `theharvester_scan`, `whois_lookup`, `quick_recon`, `full_recon`, `web_audit`, and `network_sweep`.
 
 The eight additions are:
 
@@ -50,11 +50,11 @@ The public contract, including names, parameter order/defaults, and string retur
 
 Commands are passed to subprocesses as argument lists; do not introduce `shell=True`. Inputs for the added scanners are confined to fixed mounts. Results and reports use opaque, non-overwriting names and redact common credentials.
 
-The following existing calls are direct-only: `nmap_script_scan`, `sqlmap_scan`, `crackmapexec_scan`, `hydra_attack`, `john_crack`, `hashcat_crack`, `metasploit_search`, and `metasploit_info`. Combined workflows never auto-chain them. A client or test harness must request them explicitly.
+The following existing calls are direct-only: `nmap_script_scan`, `sqlmap_scan`, `crackmapexec_scan`, `hydra_attack`, `john_crack`, `metasploit_search`, and `metasploit_info`. Combined workflows never auto-chain them. A client or test harness must request them explicitly.
 
 Authenticated scanning, private-registry authentication, report history/comparison, and new exploit execution are future work.
 
-Preserved calls have known image-level defects pending release fixes: `amass_enum` is blocked by the Kali Amass wrapper's attempted privileged libpostal bootstrap ([#15](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/15)), and the default wordlist paths used by `ffuf_scan`, `gobuster_scan`, and `wfuzz_scan` do not match the locked image ([#14](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/14)). Hydra and Hashcat also share the missing path as a fallback when their preferred wordlist is unavailable; #14 tracks the full adapter audit. These MCP contracts remain present, but affected paths are not qualified as successful default operations.
+Preserved calls have known image-level defects pending release fixes: `amass_enum` is blocked by the Kali Amass wrapper's attempted privileged libpostal bootstrap ([#15](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/15)), and the default wordlist paths used by `ffuf_scan`, `gobuster_scan`, and `wfuzz_scan` do not match the locked image ([#14](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/14)). Hydra also shares the missing path as a fallback when its preferred wordlist is unavailable; #14 tracks the full adapter audit. `hashcat_crack` was **removed** in this release: on the current Kali stack (hashcat 7.1.2 / PoCL 7.1 / LLVM 21) hashcat cannot execute any OpenCL kernel and cracks nothing, an unresolved upstream regression ([hashcat #3021](https://github.com/hashcat/hashcat/issues/3021), [#4719](https://github.com/hashcat/hashcat/issues/4719)); use `john_crack` for CPU password cracking. It will be restored when a working PoCL/hashcat lands upstream ([#45](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/45)). These MCP contracts remain present, but affected paths are not qualified as successful default operations.
 
 ## Development
 

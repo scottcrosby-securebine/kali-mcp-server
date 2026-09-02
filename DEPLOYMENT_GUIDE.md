@@ -1,6 +1,6 @@
 # Operator and deployment guide
 
-This guide is authoritative for the current Docker runtime. The server exposes 42 preserved MCP calls plus eight additions and returns strings over stdio.
+This guide is authoritative for the current Docker runtime. The server exposes 41 preserved MCP calls plus eight additions and returns strings over stdio.
 
 ## Supported hosts and build
 
@@ -32,7 +32,7 @@ All profiles also set `no-new-privileges`, use a read-only root filesystem, run 
 
 The launcher recognizes Apple Silicon even when its Python process is translated by Rosetta. Physical Intel Macs remain unsupported.
 
-Nmap uses unprivileged TCP connect scans and skips raw host discovery. SYN scans, ICMP/ARP discovery, broadcast NSE behavior, masscan, arp-scan, and netdiscover are unavailable. `hashcat_crack` is CPU-only and uses `--force`.
+Nmap uses unprivileged TCP connect scans and skips raw host discovery. SYN scans, ICMP/ARP discovery, broadcast NSE behavior, masscan, arp-scan, and netdiscover are unavailable. `hashcat_crack` was removed this release (unusable on the current Kali PoCL/hashcat stack; see the README and #45).
 
 ## Mount contract
 
@@ -120,7 +120,6 @@ The following preserved calls require an explicit client or harness request and 
 - `crackmapexec_scan`
 - `hydra_attack`
 - `john_crack`
-- `hashcat_crack`
 - `metasploit_search`
 - `metasploit_info`
 
@@ -154,7 +153,7 @@ Host-side Python is a contributor convenience, not an equivalent deployment: it 
 - `amass_enum` currently reaches a Kali wrapper that attempts a privileged libpostal bootstrap. That conflicts with the supported non-root, no-new-privileges runtime and fails before Amass starts. Track the reproducible fix in [#15](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/15).
 - Multiple adapters reference a default or fallback wordlist path absent from the locked image. `ffuf_scan`, `gobuster_scan`, and `wfuzz_scan` are confirmed default failures; Hydra and Hashcat reach the same missing path when their preferred wordlist is unavailable. Track the complete adapter audit and image regression fix in [#14](https://github.com/scottcrosby-securebine/kali-mcp-server/issues/14).
 
-These calls remain in the 42-call compatibility contract, but affected execution paths are not qualified as successful real scans. Do not describe registration or string-return coverage as successful real scans.
+These calls remain in the 41-call compatibility contract, but affected execution paths are not qualified as successful real scans. Do not describe registration or string-return coverage as successful real scans.
 
 ## Future work and explicit exclusions
 

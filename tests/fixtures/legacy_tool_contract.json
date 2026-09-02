@@ -43,7 +43,6 @@
     {"name":"smb_enum","parameters":[{"name":"target","default":""}],"return":"str"},
     {"name":"hydra_attack","parameters":[{"name":"target","default":""},{"name":"service","default":"ssh"},{"name":"username","default":""},{"name":"password_list","default":""}],"return":"str"},
     {"name":"john_crack","parameters":[{"name":"hash_file","default":""},{"name":"format","default":""}],"return":"str"},
-    {"name":"hashcat_crack","parameters":[{"name":"hash_file","default":""},{"name":"mode","default":"0"},{"name":"wordlist","default":""}],"return":"str"},
     {"name":"searchsploit_search","parameters":[{"name":"query","default":""}],"return":"str"},
     {"name":"metasploit_search","parameters":[{"name":"query","default":""}],"return":"str"},
     {"name":"metasploit_info","parameters":[{"name":"module","default":""}],"return":"str"},
@@ -62,6 +61,6 @@
   },
   "never_auto_chain": [
     "nmap_script_scan", "sqlmap_scan", "crackmapexec_scan", "hydra_attack",
-    "john_crack", "hashcat_crack", "metasploit_search", "metasploit_info"
+    "john_crack", "metasploit_search", "metasploit_info"
   ]
 }
