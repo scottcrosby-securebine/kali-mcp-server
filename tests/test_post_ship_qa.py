@@ -133,11 +133,34 @@ class ExitCodeClassificationTests(unittest.TestCase):
         self.assertTrue(out.startswith("❌"), out)
 
     def test_sslyze_cert_verdict_is_success(self):
+        # R-SSLYZE (2026-09-02, runtime-confirmed on a live host): a REAL sslyze
+        # exit-1 verdict transcript. It prints "SCAN RESULTS FOR" (the reached-
+        # verdict signal) and, crucially, does NOT contain the mixed-case
+        # "Compliance against TLS configuration" the old marker keyed on -- so the
+        # old fixture was a hand-written toy that never matched real output. This
+        # slice is copied from sslyze against a host with a SAN-mismatched cert.
+        stdout = (
+            " CHECKING CONNECTIVITY TO SERVER(S)\n"
+            "   192.0.2.10:443            => 192.0.2.10\n\n"
+            " SCAN RESULTS FOR 192.0.2.10:443 - 192.0.2.10\n"
+            " * Certificates Information:\n"
+            "     Mozilla CA Store (2026-03-28):  FAILED - Certificate is NOT Trusted:"
+            " leaf certificate has no matching subjectAltName\n")
+        _, fake = _capture(returncode=1, stdout=stdout)
+        with patch.object(self.server, "execute_command", fake):
+            out = asyncio.run(self.server.sslyze_scan(target="192.0.2.10", port="443"))
+        self.assertTrue(out.startswith("✅"), out)
+
+    def test_sslyze_success_marker_matches_real_output_case(self):
+        # Guard the R-SSLYZE root cause directly: the old mixed-case compliance
+        # banner must NOT be what classification depends on, and a transcript
+        # WITHOUT "SCAN RESULTS FOR" but WITH that banner must stay ❌ (an
+        # incomplete scan that happened to echo the phrase cannot forge success).
         _, fake = _capture(returncode=1,
                            stdout="Compliance against TLS configuration\n ... FAILED")
         with patch.object(self.server, "execute_command", fake):
-            out = asyncio.run(self.server.sslyze_scan(target="127.0.0.1", port="443"))
-        self.assertTrue(out.startswith("✅"), out)
+            out = asyncio.run(self.server.sslyze_scan(target="192.0.2.10", port="443"))
+        self.assertTrue(out.startswith("❌"), out)
 
     def test_sslyze_incomplete_scan_is_failure(self):
         # R2: exit 1 from ServerScanResultIncomplete (no compliance banner) is a
