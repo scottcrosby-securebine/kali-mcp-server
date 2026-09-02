@@ -614,8 +614,10 @@ class AdsmbTristateRenderTests(unittest.TestCase):
         Allowed idioms: `is True` / `is False`, `_adsmb_flag(...)`, and an
         explicit `==`/`!=` comparison. Equality is a value comparison, not a
         truthiness read -- the cross-doc conflict check (RT-B1-XDOC) compares two
-        posture tuples, which is safe; the bug this catches is IMPLICIT
-        truthiness (`if h.get("signing")`), which never carries `==`/`!=`."""
+        posture tuples, which is safe. The bug this catches is IMPLICIT truthiness
+        (`if h.get("signing")`), which does not NEED `==`/`!=`; a line that mixed
+        a truthiness read with an unrelated `==` would slip through. As stated
+        above, this is a cheap regression catch, not a proof."""
         source = Path(self.server.__file__).read_text(encoding="utf-8")
         field = r"""(?:\.get\(|\[)['"](signing|smbv1|null_bind)['"]"""
         offenders = [
@@ -917,9 +919,11 @@ class AdsmbCaptureFullTests(unittest.TestCase):
 
     def test_char_cap_does_not_drop_a_real_domains_users_or_maps(self):
         """RT-B4-CHARCAP: capture_full fixed the 200-LINE cut, but the enum scans
-        still clipped `flat` at MAX_REDACT_CHARS=8192 CHARS. A 500-user dump is
-        ~13 KB, so ~322 users and the share mappings after them were dropped —
-        parsed directly here (not through the seam) to isolate the char bound."""
+        still clipped `flat` at MAX_REDACT_CHARS=8192 CHARS. This fixture's 500
+        users are ~12 KB (25 chars/line), so ~170 of them and the share mappings
+        after them were dropped by the old clip; a realistic longer user line
+        (~46 chars) loses ~322. Parsed directly here (not through the seam) to
+        isolate the char bound."""
         users = "".join(f"user:[u{i:03d}] rid:[0x{i:04x}]\n" for i in range(500))
         transcript = (
             users
@@ -1073,13 +1077,40 @@ class AdsmbResumeR8Tests(unittest.TestCase):
             html = _write_docs(self.server,
                                [_result("crackmapexec", "t1", a),
                                 _result("crackmapexec", "t2", b)])
-            self.assertIn("line ambiguous", html,
+            self.assertIn("verdict withheld", html,
                           "cross-doc conflict for one ip was not withheld (RT-B1-XDOC)")
             row = re.search(r'<tr><th scope="row">DC01</th>.*?</tr>', html, re.S).group(0)
             self.assertIn("<td>not observed</td>", row,
                           "a forged scan doc's verdict survived cross-doc aggregation")
             self.assertNotIn("<td>required</td>", row)
             self.assertNotIn("<td>not required</td>", row)
+
+    def test_an_ambiguous_row_after_a_clean_not_observed_row_stays_marked(self):
+        # A clean line with NO signing/SMBv1 tokens has both verdicts "not
+        # observed" and ambiguous=False; an ambiguous row for the same ip also has
+        # "not observed" verdicts. Testing only `prev` let the tuples compare
+        # equal, dropping the ambiguity marker (RT10-1). Either side ambiguous
+        # must withhold+mark.
+        clean = self.server._parse_crackmapexec(
+            "SMB  10.0.0.5  445  DC01  [*] Windows (name:DC01) (domain:C)\n", "10.0.0.5")
+        amb = self.server._parse_crackmapexec(
+            "SMB  10.0.0.5  445  DC01  [*] W (name:DC01) (name:X) (domain:C) "
+            "(signing:True)\n", "10.0.0.9")
+        self.assertTrue(clean[0].get("ambiguous") is False)
+        self.assertTrue(amb[0].get("ambiguous") is True)
+        # Order is the whole point (the bug only bites CLEAN-first), and the
+        # file-reload path does NOT preserve list order, so render with a
+        # CONTROLLED results order directly.
+        for label, order in (("clean-first", [clean, amb]), ("amb-first", [amb, clean])):
+            doc = {"schema_version": 1, "report_type": "adsmb", "scanner": "combined",
+                   "source_type": "host", "target_ref": "x", "status": "success",
+                   "metadata": {}, "results": [
+                       _result("crackmapexec", "t1", order[0]),
+                       _result("crackmapexec", "t2", order[1])]}
+            html = self.server._render_report(doc)
+            self.assertIn("verdict withheld", html,
+                          f"[{label}] an ambiguous row was dropped by an "
+                          "identical-verdict clean row (RT10-1)")
 
 
 def _write_one(server, doc):
