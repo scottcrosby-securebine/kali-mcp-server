@@ -844,7 +844,7 @@ class AdsmbCaptureFullTests(unittest.TestCase):
     def _feed(self, coro_fn, stdout):
         captured = {}
 
-        def spy(scanner, target, parse_fn, text, status):
+        def spy(scanner, target, parse_fn, text, status, argv=None):
             captured["text"] = text
             captured["findings"] = parse_fn(text)
 
