@@ -282,5 +282,24 @@ class LegacyToolContractTests(unittest.TestCase):
                 run_command.assert_called()
 
 
+class StartupBannerMatchesContract(unittest.TestCase):
+    """CLAUDE.md, "Adding or changing a tool": preserve the 42-versus-additions
+    wording. The banner cannot read tests/ at runtime, so pin it here — every
+    addition so far bumped this literal by hand, and the one that did not left
+    the server announcing a false count at every start."""
+
+    def test_startup_banner_matches_the_contract(self):
+        import re
+
+        contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+        source = SERVER_PATH.read_text(encoding="utf-8")
+        match = re.search(r"Tools loaded: (\d+) preserved calls \+ (\d+) additions", source)
+        self.assertIsNotNone(match, "the startup banner moved; update this reader")
+        self.assertEqual(
+            (len(contract["tools"]), len(contract["additions"])),
+            (int(match.group(1)), int(match.group(2))),
+            "startup banner disagrees with legacy_tool_contract.json")
+
+
 if __name__ == "__main__":
     unittest.main()
