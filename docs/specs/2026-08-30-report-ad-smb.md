@@ -110,7 +110,8 @@ chokepoint), same trap the Metasploit card solved.
   clip falls and leave a forged group legitimately end-anchored. Such a line
   still reports the host, built from the tool's own start-anchored prefix
   columns, with OS, domain and both flags reading "not observed" and a
-  `conf-heuristic` "line ambiguous — verdict withheld" marker in its row.
+  `conf-heuristic` "verdict withheld — ambiguous or conflicting line" marker in
+  its row (the wording also covers a cross-doc posture conflict for one ip).
   Honesty must not cost visibility, and a withheld verdict must not read like a
   host the tool simply did not flag.
 - **The share table is target-controlled CONTENT, excluded from every other
@@ -195,9 +196,9 @@ already in RAW_TRANSCRIPT_SCANNERS). responder is advisory-only, not a feeder.
 New `_ADSMB_TEMPLATE` (SMB Perimeter IA), reusing escaped/rows/list_items/chart
 + existing tokens/CSS/badges. Sections:
 1. **Posture summary tiles** — hosts assessed, SMBv1-on count, signing-off count,
-   null-bind count, verdicts withheld (ambiguous lines), shares flagged.
+   null-bind count, verdicts withheld (ambiguous or conflicting), shares flagged.
 2. **Per-host SMB posture** table — host · IP · OS · domain · signing · SMBv1 ·
-   null-bind (crackmapexec spine).
+   null-bind · Parse (the ambiguous/conflict withheld marker) (crackmapexec spine).
 3. **Share inventory** — host · share · type · comment · map (OK/DENIED) ·
    sensitivity flag (heuristic badge).
 4. **Users + password policy** — user list (count + names) + policy summary

@@ -611,10 +611,11 @@ class AdsmbTristateRenderTests(unittest.TestCase):
         (`k = "smbv1"; h.get(k)`) or a consumer outside this file (red-team N9).
         It catches the regression that actually happened, cheaply, every run.
 
-        Allowed idioms: `is True` / `is False`, `_adsmb_flag(...)`, and an
-        explicit `==`/`!=` comparison. Equality is a value comparison, not a
-        truthiness read -- the cross-doc conflict check (RT-B1-XDOC) compares two
-        posture tuples, which is safe. The bug this catches is IMPLICIT truthiness
+        Allowed idioms: `is True` / `is False`, `_adsmb_flag(...)`,
+        `_merge_flag(...)` (a safe tri-state consumer that only compares values),
+        and an explicit `==`/`!=` comparison. Equality is a value comparison, not
+        a truthiness read -- the cross-doc merge (RT-B1-XDOC / B1) compares posture
+        values, which is safe. The bug this catches is IMPLICIT truthiness
         (`if h.get("signing")`), which does not NEED `==`/`!=`; a line that mixed
         a truthiness read with an unrelated `==` would slip through. As stated
         above, this is a cheap regression catch, not a proof."""
@@ -627,7 +628,7 @@ class AdsmbTristateRenderTests(unittest.TestCase):
             and re.search(field, line)
             # a WRITE (`hosts[ip]["null_bind"] = True`) is not a truthiness read
             and not re.search(r"""\[['"](signing|smbv1|null_bind)['"]\]\s*=[^=]""", line)
-            and not re.search(r"\bis (True|False)\b|_adsmb_flag\(|==|!=", line)
+            and not re.search(r"\bis (True|False)\b|_adsmb_flag\(|_merge_flag\(|==|!=", line)
         ]
         self.assertEqual([], offenders, f"truthiness read of a tri-state field: {offenders}")
 
@@ -1111,6 +1112,84 @@ class AdsmbResumeR8Tests(unittest.TestCase):
             self.assertIn("verdict withheld", html,
                           f"[{label}] an ambiguous row was dropped by an "
                           "identical-verdict clean row (RT10-1)")
+
+    def _render_docs(self, docs):
+        return self.server._render_report({
+            "schema_version": 1, "report_type": "adsmb", "scanner": "combined",
+            "source_type": "host", "target_ref": "x", "status": "success",
+            "metadata": {}, "results": docs})
+
+    def test_a_clean_not_observed_row_does_not_suppress_a_real_weakness(self):
+        # B1: "not observed" is absence of evidence, NOT a contrary verdict. A
+        # clean token-free row for an ip must not withhold a genuine
+        # signing:False/SMBv1:True weakness observed in another scan doc.
+        weak = self.server._parse_crackmapexec(
+            "SMB  10.0.0.5  445  DC01  [*] W (name:DC01) (domain:C) "
+            "(signing:False) (SMBv1:True)\n", "10.0.0.5")
+        tokenless = self.server._parse_crackmapexec(
+            "SMB  10.0.0.5  445  DC01  [*] W (name:DC01) (domain:C)\n", "10.0.0.9")
+        self.assertTrue(tokenless[0].get("signing") == "not observed")
+        for label, order in (("weak-first", [weak, tokenless]),
+                             ("tokenless-first", [tokenless, weak])):
+            html = self._render_docs([_result("crackmapexec", "t1", order[0]),
+                                      _result("crackmapexec", "t2", order[1])])
+            row = re.search(r'<tr><th scope="row">DC01</th>.*?</tr>', html, re.S).group(0)
+            self.assertIn("<td>not required</td>", row,
+                          f"[{label}] a token-free row suppressed a real weakness (B1)")
+            self.assertIn("<td>enabled</td>", row, f"[{label}] SMBv1 weakness lost")
+            self.assertIn("T1557.001", html, f"[{label}] ATT&CK weakness dropped")
+            self.assertNotIn("verdict withheld", row,
+                             f"[{label}] absence wrongly marked a conflict")
+
+    def test_a_true_conflict_still_withholds_only_the_conflicting_field(self):
+        # The forgery defence still holds: two DEFINITE values that disagree
+        # withhold that field (and mark the row), while a field they AGREE on
+        # keeps its verdict.
+        a = self.server._parse_crackmapexec(
+            "SMB  10.0.0.5  445  DC01  [*] W (name:DC01) (signing:False) (SMBv1:True)\n", "1")
+        b = self.server._parse_crackmapexec(
+            "SMB  10.0.0.5  445  DC01  [*] W (name:DC01) (signing:True) (SMBv1:True)\n", "2")
+        html = self._render_docs([_result("crackmapexec", "t1", a),
+                                  _result("crackmapexec", "t2", b)])
+        row = re.search(r'<tr><th scope="row">DC01</th>.*?</tr>', html, re.S).group(0)
+        self.assertIn("verdict withheld", row, "a real signing conflict was not marked")
+        # signing conflicts (withheld) but SMBv1 agrees True (kept "enabled")
+        self.assertIn("<td>enabled</td>", row, "an agreed SMBv1 verdict was needlessly withheld")
+
+    def test_a_parse_miss_transcript_is_not_hidden_by_another_structured_scan(self):
+        # B2: a raw parse-miss card used to render only when NO structured host
+        # existed anywhere, so one scan's structured row hid another's transcript.
+        raw = self.server._parse_crackmapexec("UNPARSED-CME-TRANSCRIPT-XYZ", "10.0.0.5")
+        struct = self.server._parse_crackmapexec(
+            "SMB  10.0.0.9  445  WS  [*] W (name:WS) (signing:True) (SMBv1:False)\n", "10.0.0.9")
+        self.assertTrue(raw[0].get("kind") == "raw")
+        html = self._render_docs([_result("crackmapexec", "t1", raw),
+                                  _result("crackmapexec", "t2", struct)])
+        self.assertIn("UNPARSED-CME-TRANSCRIPT-XYZ", html,
+                      "a captured parse-miss transcript was dropped when another scan parsed (B2)")
+
+    def test_conflicting_password_policy_is_marked_not_silently_first_wins(self):
+        # B3: two enum docs disagreeing on a policy field must not silently pick
+        # one; the field reads "conflicting across scans — verify".
+        weak = self.server._parse_enum4linux("[+] Minimum password length: 1\n", "10.0.0.5")
+        strong = self.server._parse_enum4linux("[+] Minimum password length: 14\n", "10.0.0.9")
+        for label, order in (("weak-first", [weak, strong]),
+                             ("strong-first", [strong, weak])):
+            html = self._render_docs([_result("enum4linux", "10.0.0.5", order[0]),
+                                      _result("enum4linux", "10.0.0.9", order[1])])
+            policy = re.search(r"Minimum password length</th>.*?</tr>", html, re.S).group(0)
+            self.assertIn("conflicting across scans", policy,
+                          f"[{label}] a policy disagreement was silently first-wins (B3)")
+            self.assertNotIn(">1<", policy)
+            self.assertNotIn(">14<", policy)
+
+    def test_transcript_clip_lands_on_a_line_boundary(self):
+        cap = self.server.MAX_ADSMB_TRANSCRIPT
+        text = "a" * (cap - 5) + "\n" + "FORGED_PARTIAL_LINE_WITH_NO_NEWLINE"
+        out = self.server._clip_adsmb_transcript(text)
+        self.assertNotIn("FORGED", out,
+                         "a truncated final line survived the transcript clip")
+        self.assertTrue(out.endswith("\n"), "clip did not land on a line boundary")
 
 
 def _write_one(server, doc):
