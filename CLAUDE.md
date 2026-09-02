@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A single-file MCP (Model Context Protocol) server preserving 41 Kali Linux calls and adding eight bounded scanning/reporting calls. An MCP client calls the tools over stdio; the server invokes underlying Kali binaries and returns strings. MCP behavior lives in `kali_pentest_server.py`. Host-side Docker profile selection lives in `kali_mcp_launcher.py` and its `scripts/kali-mcp` entry point.
+A single-file MCP (Model Context Protocol) server preserving 41 Kali Linux calls and adding nine bounded scanning/reporting calls. An MCP client calls the tools over stdio; the server invokes underlying Kali binaries and returns strings. MCP behavior lives in `kali_pentest_server.py`. Host-side Docker profile selection lives in `kali_mcp_launcher.py` and its `scripts/kali-mcp` entry point.
 
 ## Commands
 
