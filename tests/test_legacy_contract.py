@@ -21,15 +21,15 @@ class LegacyToolContractTests(unittest.TestCase):
         cls.contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
         cls.server, cls.mcp = load_server()
 
-    def test_fixture_is_a_static_unique_42_tool_inventory(self):
+    def test_fixture_is_a_static_unique_41_tool_inventory(self):
         self.assertEqual(1, self.contract["schema_version"])
         self.assertEqual(
             {"schema_version", "tools", "additions", "composites", "never_auto_chain"},
             set(self.contract),
         )
         names = [tool["name"] for tool in self.contract["tools"]]
-        self.assertEqual(42, len(names))
-        self.assertEqual(42, len(set(names)))
+        self.assertEqual(41, len(names))
+        self.assertEqual(41, len(set(names)))
         for tool in self.contract["tools"] + self.contract["additions"]:
             self.assertEqual({"name", "parameters", "return"}, set(tool))
             self.assertEqual("str", tool["return"])
@@ -261,7 +261,6 @@ class LegacyToolContractTests(unittest.TestCase):
             # wordlist is now required (#56): an empty list used to default to
             # rockyou and a missing path silently swapped to dirb. isfile is
             # patched True below, so any path is accepted.
-            "hashcat_crack": ("/workspace/hashes.txt", "0", "/workspace/wordlist.txt"),
             "metasploit_search": ("CVE-2021-44228",),
             "metasploit_info": ("exploit/test/module",),
         }
@@ -283,7 +282,7 @@ class LegacyToolContractTests(unittest.TestCase):
 
 
 class StartupBannerMatchesContract(unittest.TestCase):
-    """CLAUDE.md, "Adding or changing a tool": preserve the 42-versus-additions
+    """CLAUDE.md, "Adding or changing a tool": preserve the preserved-versus-additions
     wording. The banner cannot read tests/ at runtime, so pin it here — every
     addition so far bumped this literal by hand, and the one that did not left
     the server announcing a false count at every start."""

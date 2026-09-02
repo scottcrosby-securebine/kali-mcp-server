@@ -28,7 +28,7 @@ for lock_file in ${lock_files}; do
     done < "${lock_file}"
 done
 
-required_binaries="python3 nmap dig dnsrecon dnsenum fierce whois nc nikto wpscan sqlmap dirb ffuf gobuster wfuzz whatweb wafw00f sslscan sslyze testssl enum4linux nbtscan smbclient crackmapexec responder hydra john hashcat searchsploit msfconsole nuclei theHarvester subfinder amass trivy syft olevba msodde uro"
+required_binaries="python3 nmap dig dnsrecon dnsenum fierce whois nc nikto wpscan sqlmap dirb ffuf gobuster wfuzz whatweb wafw00f sslscan sslyze testssl enum4linux nbtscan smbclient crackmapexec responder hydra john searchsploit msfconsole nuclei theHarvester subfinder amass trivy syft olevba msodde uro"
 
 for binary in ${required_binaries}; do
     command -v "${binary}" >/dev/null 2>&1 || {
@@ -88,7 +88,7 @@ try:
 except (OSError, TypeError, KeyError, json.JSONDecodeError, ValueError) as error:
     raise SystemExit(f"invalid legacy MCP contract at {contract_path}: {error}") from error
 
-if len(legacy_names) != 42 or len(set(legacy_names)) != 42:
+if len(legacy_names) != 41 or len(set(legacy_names)) != 41:
     raise SystemExit(
         "legacy MCP contract must contain exactly 42 uniquely named tools; "
         f"found {len(legacy_names)} entries and {len(set(legacy_names))} unique names"

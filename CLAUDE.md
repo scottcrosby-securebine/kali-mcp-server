@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A single-file MCP (Model Context Protocol) server preserving 42 Kali Linux calls and adding eight bounded scanning/reporting calls. An MCP client calls the tools over stdio; the server invokes underlying Kali binaries and returns strings. MCP behavior lives in `kali_pentest_server.py`. Host-side Docker profile selection lives in `kali_mcp_launcher.py` and its `scripts/kali-mcp` entry point.
+A single-file MCP (Model Context Protocol) server preserving 41 Kali Linux calls and adding eight bounded scanning/reporting calls. An MCP client calls the tools over stdio; the server invokes underlying Kali binaries and returns strings. MCP behavior lives in `kali_pentest_server.py`. Host-side Docker profile selection lives in `kali_mcp_launcher.py` and its `scripts/kali-mcp` entry point.
 
 ## Commands
 
@@ -96,11 +96,11 @@ The image runs as non-root user `pentest`. The launcher supplies `--security-opt
 
 - All nmap tools use `-sT` (TCP connect) and `-Pn` (skip host-discovery ping). SYN scans (`-sS`), ICMP discovery, and ARP scans won't work. The Dockerfile deliberately `setcap -r`s nmap.
 - Raw-socket tools (masscan, arp-scan, netdiscover) are intentionally absent from the image.
-- `hashcat` runs CPU-only (`--force`).
+- `hashcat_crack` is removed: hashcat cannot run any OpenCL kernel on the current Kali PoCL stack (upstream regression, see #45). `john` covers CPU cracking.
 
 ## Adding or changing a tool
 
-Match the existing pattern exactly: `@mcp.tool()` async fn, string defaults, one-line docstring, validate → build argument list → text or structured adapter, return `str`. Use `run_command` for legacy text output; use a shared structured helper only when complete machine-readable output must be parsed before bounding the public response. New tools must not need raw sockets or root, and their binary must be pinned in the container build. Update `tests/fixtures/legacy_tool_contract.json` deliberately, preserve the 42-versus-additions wording, update current docs, and run the native plus container gates.
+Match the existing pattern exactly: `@mcp.tool()` async fn, string defaults, one-line docstring, validate → build argument list → text or structured adapter, return `str`. Use `run_command` for legacy text output; use a shared structured helper only when complete machine-readable output must be parsed before bounding the public response. New tools must not need raw sockets or root, and their binary must be pinned in the container build. Update `tests/fixtures/legacy_tool_contract.json` deliberately, preserve the preserved-versus-additions wording, update current docs, and run the native plus container gates.
 
 ## Agent skills
 
