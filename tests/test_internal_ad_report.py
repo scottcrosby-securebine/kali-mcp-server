@@ -611,11 +611,11 @@ class AdsmbTristateRenderTests(unittest.TestCase):
         (`k = "smbv1"; h.get(k)`) or a consumer outside this file (red-team N9).
         It catches the regression that actually happened, cheaply, every run.
 
-        Allowed idioms: `is True` / `is False`, `_adsmb_flag(...)`,
-        `_merge_flag(...)` (a safe tri-state consumer that only compares values),
-        and an explicit `==`/`!=` comparison. Equality is a value comparison, not
-        a truthiness read -- the cross-doc merge (RT-B1-XDOC / B1) compares posture
-        values, which is safe. The bug this catches is IMPLICIT truthiness
+        Allowed idioms: `is True` / `is False`, `_adsmb_flag(...)`, and an
+        explicit `==`/`!=` comparison. Equality is a value comparison, not a
+        truthiness read. The cross-doc aggregation reads the flags through an
+        INDIRECT key (`f.get(field)` where field is a loop variable), which this
+        literal-key lint cannot see anyway. The bug this catches is IMPLICIT truthiness
         (`if h.get("signing")`), which does not NEED `==`/`!=`; a line that mixed
         a truthiness read with an unrelated `==` would slip through. As stated
         above, this is a cheap regression catch, not a proof."""
@@ -628,7 +628,7 @@ class AdsmbTristateRenderTests(unittest.TestCase):
             and re.search(field, line)
             # a WRITE (`hosts[ip]["null_bind"] = True`) is not a truthiness read
             and not re.search(r"""\[['"](signing|smbv1|null_bind)['"]\]\s*=[^=]""", line)
-            and not re.search(r"\bis (True|False)\b|_adsmb_flag\(|_merge_flag\(|==|!=", line)
+            and not re.search(r"\bis (True|False)\b|_adsmb_flag\(|==|!=", line)
         ]
         self.assertEqual([], offenders, f"truthiness read of a tri-state field: {offenders}")
 
@@ -1190,6 +1190,45 @@ class AdsmbResumeR8Tests(unittest.TestCase):
         self.assertNotIn("FORGED", out,
                          "a truncated final line survived the transcript clip")
         self.assertTrue(out.endswith("\n"), "clip did not land on a line boundary")
+
+    def test_an_agreed_weakness_survives_a_conflict_on_a_different_field(self):
+        # codex-B1: three docs for one ip. signing conflicts (A=False, B=True) but
+        # SMBv1 is agreed True by all three. The old pairwise merge marked the row
+        # ambiguous on the signing conflict, then a third doc's "withhold all"
+        # branch suppressed the AGREED SMBv1 weakness (tile 0, no T1210). Order-
+        # independent accumulate must keep SMBv1 enabled while withholding signing.
+        A = self.server._parse_crackmapexec(
+            "SMB  10.0.0.5  445  DC  [*] W (name:DC) (signing:False) (SMBv1:True)\n", "1")
+        B = self.server._parse_crackmapexec(
+            "SMB  10.0.0.5  445  DC  [*] W (name:DC) (signing:True) (SMBv1:True)\n", "2")
+        C = self.server._parse_crackmapexec(
+            "SMB  10.0.0.5  445  DC  [*] W (name:DC) (signing:True) (SMBv1:True)\n", "3")
+        import itertools
+        for order in itertools.permutations([("d1", A), ("d2", B), ("d3", C)]):
+            html = self._render_docs([_result("crackmapexec", t, f) for t, f in order])
+            row = re.search(r'<tr><th scope="row">DC</th>.*?</tr>', html, re.S).group(0)
+            names = [t for t, _ in order]
+            self.assertIn("<td>enabled</td>", row,
+                          f"{names}: an agreed SMBv1 weakness was suppressed by a signing conflict (codex-B1)")
+            self.assertIn("T1210", html, f"{names}: SMBv1 ATT&CK technique dropped")
+            self.assertIn("verdict withheld", row, f"{names}: the signing conflict was not marked")
+
+    def test_a_malformed_host_line_in_a_mixed_transcript_is_surfaced(self):
+        # codex-B2: one transcript, one malformed host line + one good line. The
+        # malformed line (host prefix, no parseable tail) must surface as an
+        # AMBIGUOUS host, not be silently dropped because another line parsed.
+        transcript = (
+            "SMB  10.0.0.5  445  LOST  [*] malformed-tail-with-no-name\n"
+            "SMB  10.0.0.6  445  GOOD  [*] W (name:GOOD) (domain:C) "
+            "(signing:True) (SMBv1:False)\n")
+        hosts = {f.get("ip"): f for f in self.server._parse_crackmapexec(transcript, "t")
+                 if isinstance(f, dict) and f.get("kind") == "host"}
+        self.assertIn("10.0.0.5", hosts,
+                      "a malformed host line was dropped when another line parsed (codex-B2)")
+        self.assertIs(hosts["10.0.0.5"].get("ambiguous"), True,
+                      "the malformed host line was not marked ambiguous")
+        self.assertIn("10.0.0.6", hosts)
+        self.assertIs(hosts["10.0.0.6"].get("ambiguous"), False)
 
 
 def _write_one(server, doc):
