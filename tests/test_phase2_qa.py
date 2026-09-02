@@ -86,21 +86,35 @@ class ControlByteStripTests(unittest.TestCase):
         # input finished in ~19s before the bound, ~0.2s after; 2s guards regression.
         import time
         # Two O(n^2) sources lived in this one pattern; each shape pins a different
-        # bound, and each is sized so the UNBOUNDED version blows past 2s (verified
-        # by reverting each bound: many-quotes/200KB -> ~19s on an unbounded gap;
-        # unterminated/820KB -> ~13s on unbounded quoted-name spans), while the
-        # bounded version stays <1s. Undersizing is why the first cut of this test
-        # passed on the vulnerable code (green-gate-is-not-a-proving-gate).
-        #   many-quotes (closing quote every 8 chars) pins the name->contents gap {0,120}
-        #   unterminated / keyword-dense pins the quoted-name spans {0,200}
-        for label, payload in (
-            ("gap {0,120}", "'token' " * (200 * 1024 // 8)),
-            ("span {0,200}", "'" + "authorization" * (820 * 1024 // 13)),
+        # bound (many-quotes, closing quote every 8 chars, pins the name->contents
+        # gap {0,120}; unterminated / keyword-dense pins the quoted-name spans
+        # {0,200}). Reverting either bound blows the unbounded version past ~13-19s.
+        #
+        # Gated on the SCALING RATIO, not an absolute wall-clock bound. The
+        # chokepoint's absolute cost is machine-dependent and gained a linear
+        # constant when the F1 orphan-secret guard joined _redact_scanner_data, so
+        # a fixed 2.0s threshold flaked on CI (2.08s) with no quadratic regression
+        # (wall-clock-perf-asserts-flake-on-ci). Linear work DOUBLES when the input
+        # doubles (ratio ~2); an O(n^2) regression QUADRUPLES it (ratio ~4). A 3.0
+        # limit separates them at any machine speed. Base sizes are the originals.
+        def elapsed(payload):
+            start = time.time()
+            self.server._redact_scanner_data(payload)
+            return time.time() - start
+        for label, mk in (
+            ("gap {0,120}", lambda kb: "'token' " * (kb * 1024 // 8)),
+            ("span {0,200}", lambda kb: "'" + "authorization" * (kb * 1024 // 13)),
         ):
             with self.subTest(shape=label):
-                start = time.time()
-                self.server._redact_scanner_data(payload)
-                self.assertLess(time.time() - start, 2.0, f"nikto pattern quadratic: {label}")
+                base = 200 if label.startswith("gap") else 820
+                t_n = elapsed(mk(base))
+                t_2n = elapsed(mk(base * 2))
+                # Hang guard: a catastrophic quadratic blows past any sane wall clock.
+                self.assertLess(t_2n, 30.0, f"nikto pattern pathological: {label}")
+                # Ratio guard: skip only if both are at timer noise (very fast host).
+                if t_n >= 0.05:
+                    self.assertLess(t_2n, 3.0 * t_n,
+                                    f"nikto pattern superlinear ({t_2n:.3f}s vs {t_n:.3f}s): {label}")
 
     def test_whitespace_separator_folded_not_deleted(self):
         # red-team B1: a keyword/value separator that is NBSP/NEL/a C0-C1 control /
