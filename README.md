@@ -1,6 +1,6 @@
 # Kali MCP Server
 
-An MCP stdio server that preserves 42 Kali security calls and adds five bounded scanning and local-reporting calls. The supported runtime is the repository's Docker image launched through `scripts/kali-mcp` on Linux amd64/arm64 or Apple Silicon.
+An MCP stdio server that preserves 42 Kali security calls and adds eight bounded scanning and local-reporting calls. The supported runtime is the repository's Docker image launched through `scripts/kali-mcp` on Linux amd64/arm64 or Apple Silicon.
 
 Use this software only on systems and data you own or are explicitly authorized to assess.
 
@@ -31,7 +31,7 @@ The 42 preserved calls are:
 
 `nmap_scan`, `nmap_service_scan`, `nmap_vuln_scan`, `nmap_comprehensive_scan`, `nmap_port_scan`, `nmap_script_scan`, `dns_enum`, `dns_recon`, `subfinder_scan`, `amass_enum`, `fierce_scan`, `nikto_scan`, `wpscan_scan`, `dirb_scan`, `ffuf_scan`, `gobuster_scan`, `wfuzz_scan`, `sqlmap_scan`, `whatweb_scan`, `wafw00f_scan`, `nuclei_scan`, `web_headers`, `sslscan_scan`, `testssl_scan`, `sslyze_scan`, `enum4linux_scan`, `nbtscan_scan`, `crackmapexec_scan`, `responder_analyze`, `smb_enum`, `hydra_attack`, `john_crack`, `hashcat_crack`, `searchsploit_search`, `metasploit_search`, `metasploit_info`, `theharvester_scan`, `whois_lookup`, `quick_recon`, `full_recon`, `web_audit`, and `network_sweep`.
 
-The five additions are:
+The eight additions are:
 
 | Call | Purpose |
 |---|---|
@@ -39,6 +39,9 @@ The five additions are:
 | `syft_sbom` | Generate CycloneDX, SPDX, or Syft JSON from a mounted source, archive, OCI layout, or public registry |
 | `oletools_scan` | Analyze one bounded Office artifact with `olevba` or `msodde` |
 | `generate_report` | Render a self-contained local HTML report from one result ID, or from every result captured in the session |
+| `web_app_report` | Render a web-application OWASP Top-10 (2021) + WSTG report from captured web-scanner results, or one web result ID |
+| `surface_report` | Render an inventory-first external attack-surface report from captured external-recon results, or one result ID |
+| `internal_ad_report` | Render an OBSERVED-ONLY internal AD/SMB posture report from captured AD/SMB results, or one result ID |
 | `list_results` | List the captured scanner results in the session available for report generation |
 
 The public contract, including names, parameter order/defaults, and string returns, is pinned in `tests/fixtures/legacy_tool_contract.json`.

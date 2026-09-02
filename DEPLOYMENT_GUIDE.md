@@ -1,6 +1,6 @@
 # Operator and deployment guide
 
-This guide is authoritative for the current Docker runtime. The server exposes 42 preserved MCP calls plus five additions and returns strings over stdio.
+This guide is authoritative for the current Docker runtime. The server exposes 42 preserved MCP calls plus eight additions and returns strings over stdio.
 
 ## Supported hosts and build
 
