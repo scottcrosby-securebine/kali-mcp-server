@@ -123,7 +123,8 @@ class RetestClassifierTests(unittest.TestCase):
         for b_t, c_t in (("Example.COM", "example.com"),
                          ("example.com.", "example.com"),
                          (" example.com ", "example.com"),
-                         ("HTTPS://Example.com.", "example.com")):
+                         ("HTTPS://Example.com.", "example.com"),
+                         ("example.com.:443", "example.com:443")):
             base = _doc(target=b_t, findings=[_port("port-80-tcp")], captured_at=B_AT)
             cur = _doc(target=c_t, findings=[_port("port-80-tcp")], captured_at=C_AT)
             self.assertTrue(self.server._retest_same_target(base, cur), (b_t, c_t))
@@ -134,6 +135,8 @@ class RetestClassifierTests(unittest.TestCase):
                          ("example.com", "example.org"),
                          ("example.com:443", "example.com:8443"),
                          ("example.com/a", "example.com/b"),
+                         ("example.com/A", "example.com/a"),
+                         ("example.com..", "example.com"),
                          ("example.com", "example.com.evil.test")):
             base = _doc(target=b_t, findings=[_port("port-80-tcp")], captured_at=B_AT)
             cur = _doc(target=c_t, findings=[_port("port-80-tcp")], captured_at=C_AT)
