@@ -8,6 +8,7 @@
     {"name":"web_app_report","parameters":[{"name":"result_ref","default":""}],"return":"str"},
     {"name":"surface_report","parameters":[{"name":"result_ref","default":""}],"return":"str"},
     {"name":"internal_ad_report","parameters":[{"name":"result_ref","default":""}],"return":"str"},
+    {"name":"retest_report","parameters":[{"name":"baseline_ref","default":""},{"name":"result_ref","default":""}],"return":"str"},
     {"name":"list_results","parameters":[],"return":"str"}
   ],
   "tools": [
