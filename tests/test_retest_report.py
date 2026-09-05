@@ -116,6 +116,33 @@ class RetestClassifierTests(unittest.TestCase):
                         f"cross-target must be UNKNOWN, got {[r['verdict'] for r in rows]}")
 
 
+    def test_same_asset_spelling_variants_are_not_refused(self):
+        """DF1: one asset spelled with different case, surrounding whitespace, or
+        a trailing FQDN dot is the SAME target; the pair must compare normally,
+        not fall to UNKNOWN (over-rejection is invisible unless pinned)."""
+        for b_t, c_t in (("Example.COM", "example.com"),
+                         ("example.com.", "example.com"),
+                         (" example.com ", "example.com"),
+                         ("HTTPS://Example.com.", "example.com"),
+                         ("example.com.:443", "example.com:443")):
+            base = _doc(target=b_t, findings=[_port("port-80-tcp")], captured_at=B_AT)
+            cur = _doc(target=c_t, findings=[_port("port-80-tcp")], captured_at=C_AT)
+            self.assertTrue(self.server._retest_same_target(base, cur), (b_t, c_t))
+            self.assertEqual("UNCHANGED", self._verdicts(self.server._retest_classify(base, cur))["port-80-tcp"], (b_t, c_t))
+
+    def test_different_assets_stay_refused_after_normalization(self):
+        for b_t, c_t in (("10.0.0.1", "10.0.0.2"),
+                         ("example.com", "example.org"),
+                         ("example.com:443", "example.com:8443"),
+                         ("example.com/a", "example.com/b"),
+                         ("example.com/A", "example.com/a"),
+                         ("example.com..", "example.com"),
+                         ("example.com", "example.com.evil.test")):
+            base = _doc(target=b_t, findings=[_port("port-80-tcp")], captured_at=B_AT)
+            cur = _doc(target=c_t, findings=[_port("port-80-tcp")], captured_at=C_AT)
+            self.assertFalse(self.server._retest_same_target(base, cur), (b_t, c_t))
+
+
 class RetestReportToolTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -173,6 +200,12 @@ class RetestReportToolTests(unittest.TestCase):
         response, _ = self._run(base, cur)
         self.assertTrue(response.startswith("\u274c"), response)
         self.assertIn("target", response.lower())
+
+    def test_tool_accepts_same_asset_case_variant(self):
+        base = _doc(target="Example.COM", findings=[_port("port-80-tcp")], captured_at=B_AT)
+        cur = _doc(target="example.com", findings=[_port("port-80-tcp")], captured_at=C_AT)
+        response, _ = self._run(base, cur)
+        self.assertEqual("/reports/" + "C" * 32 + ".html", response)
 
     def test_missing_ref_errors(self):
         import asyncio
