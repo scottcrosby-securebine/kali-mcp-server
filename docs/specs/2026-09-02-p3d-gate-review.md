@@ -55,3 +55,27 @@ PAUSED per Scott before repair round.
 - S2 (minor Duplicated Code): redact-argv expression duplicated in _capture_findings
   and nuclei_scan. Helper candidate.
 - S3/S4 (low/very-minor): 'closure-free' naming; (scanner,target,finding,...) clump.
+
+## Loop 2 — F1 repair round (e05dfbd)
+
+Fix: `_retest_same_target` binds the pair to one normalized `target_ref`;
+`_retest_classify` (sole verdict producer) short-circuits a cross-target pair to
+whole-pair UNKNOWN before any presence or absence verdict; `retest_report` refuses
+a cross-target pair. `_retest_pair_comparable` deliberately untouched (single caller,
+below the guard, gates absence only; a guard there would not cover presence).
+Tests: `NMAP_ARGV` de-fixtured to the real captured argv (no target); cross-target
+classifier + tool-refusal cases added; each pins exactly its own guard (mutants).
+
+Gate: native (712 OK, redaction 0/800, mutation-check vs f9d7d0e caught, container
+verify + integration seam green) + Standards + Spec + red team, two consecutive
+clean passes, zero blocking. Red team seats were same-model fresh-context critics
+(codex sandbox could not read source in pass 1).
+
+Deferred, non-blocking: DF1 guard normalizes scheme-only, weaker than the Phase-2
+identity model (case / trailing-dot / name-vs-IP same-asset pairs fall to
+UNKNOWN or refuse, safe direction); DF2/DF3 cosmetic row labelling on the
+classify cross-target path, unreachable via the tool; DF4 both-targetless docs
+pass the guard (malformed only); DF5 redaction collapses same-host
+different-credential scope (pre-existing, cited non-claim only); DF6/DF7 foreign
+or pre-P2 docs only. Loop-1 spec-vs-code items (M1/M2, M3, S1, W1) still await
+the owner's ruling.
