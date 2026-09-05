@@ -79,3 +79,29 @@ pass the guard (malformed only); DF5 redaction collapses same-host
 different-credential scope (pre-existing, cited non-claim only); DF6/DF7 foreign
 or pre-P2 docs only. Loop-1 spec-vs-code items (M1/M2, M3, S1, W1) still await
 the owner's ruling.
+
+## Loop 3 — DF1 target-normalization tightening (owner ruling, 30e048c)
+
+Change: `_retest_same_target` now strips whitespace, drops the scheme, lowercases
+the host portion only, and drops one trailing FQDN dot before an optional `:port`.
+A different port, path, or name-vs-IP still refuses; path case is preserved.
+Tests pin both directions, including three mutants (whole-string lowercase, no
+port branch, strip-all-dots) that survive without them.
+
+Gate: native (715 OK, redaction 0/800, mutation-check vs 628d7f5 caught, container
+verify + integration green) + Standards + Spec + red team, two consecutive clean
+passes (20adb78, then test-only 30e048c), zero blocking. Red team seats were
+fresh-context same-model critics executing against the real function.
+
+Deferred, non-blocking: DF8 trivy/syft relative-path first segment is lowercased
+(unvetted, ADVISORY only); DF9 acceptance is complete only for out_args scanners,
+since whatweb-class scanners carry the target inside argv and a case variant still
+falls to UNKNOWN via the argv scope check (safe, not a regression); DF10
+query/fragment before any slash is case-folded (same host); DF11 IPv6 zone-id case
+folded; DF12 a scheme-only variant pair (`10.0.0.1` vs `http://10.0.0.1`) passes the
+guard but `_retest_single_host_ok` reads the raw target and returns ADVISORY with
+a "multi-host" reason (safe, weakly reachable); DF13/DF14 docstring says "trailing
+FQDN dot" and "different scheme" while the code strips any single trailing dot and
+knows only http/https (correct-but-loose); DF15 `generate_report` section dedupe
+still uses the bare scheme-only normalizer, so `Example.COM` and `example.com`
+render as two sections while re-test treats them as one asset.
