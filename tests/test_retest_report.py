@@ -9,7 +9,9 @@ from server_test_support import load_server
 
 B_AT = "2020-01-01T00:00:00+00:00"
 C_AT = "2020-02-01T00:00:00+00:00"
-NMAP_ARGV = ["nmap", "--unprivileged", "-sT", "-Pn", "10.0.0.5"]
+# Real captured argv for `nmap_scan` (no ports): the target is NOT here — it is
+# appended via out_args (["-oX", path, "--", target]) and stored argv omits it (F1).
+NMAP_ARGV = ["nmap", "--unprivileged", "-sT", "-Pn", "-F"]
 
 
 def _doc(scanner="nmap", target="10.0.0.5", findings=(), status="success",
@@ -101,6 +103,19 @@ class RetestClassifierTests(unittest.TestCase):
             self.assertNotIn(banned, blob)
 
 
+    def test_cross_target_never_yields_a_verdict(self):
+        """F1: two docs for DIFFERENT targets must not compare. nmap's identity
+        is host-blind (port-N-proto) and the stored argv omits the target, so a
+        naive gate reads hostA-vs-hostB as comparable. The whole pair is UNKNOWN
+        — never UNCHANGED/NEW/NOT_OBSERVED_ON_RETEST."""
+        base = _doc(target="10.0.0.1", findings=[_port("port-80-tcp")], captured_at=B_AT)
+        cur = _doc(target="10.0.0.2", findings=[_port("port-80-tcp")], captured_at=C_AT)
+        rows = self.server._retest_classify(base, cur)["rows"]
+        self.assertTrue(rows)
+        self.assertTrue(all(r["verdict"] == "UNKNOWN" for r in rows),
+                        f"cross-target must be UNKNOWN, got {[r['verdict'] for r in rows]}")
+
+
 class RetestReportToolTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -151,6 +166,13 @@ class RetestReportToolTests(unittest.TestCase):
         cur = _doc(findings=[_port("port-80-tcp")], captured_at=C_AT)
         response, _ = self._run(base, cur)
         self.assertIn("No baseline findings", response)
+
+    def test_tool_refuses_cross_target(self):
+        base = _doc(target="10.0.0.1", findings=[_port("port-80-tcp")], captured_at=B_AT)
+        cur = _doc(target="10.0.0.2", findings=[_port("port-80-tcp")], captured_at=C_AT)
+        response, _ = self._run(base, cur)
+        self.assertTrue(response.startswith("\u274c"), response)
+        self.assertIn("target", response.lower())
 
     def test_missing_ref_errors(self):
         import asyncio
